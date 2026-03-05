@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════
-   Aztec Calendar – Tonalpohualli
-   Sacred calendar UI with rotating rings and animated symbols
+   Aztec Calendar – Tonalpohualli – Stone Carved
+   Realistic stone tablet with carved relief symbols
    ═══════════════════════════════════════════════════════════════════ */
 
 /* ── Base Container ─────────────────────────────────────────────── */
@@ -11,61 +11,36 @@
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: radial-gradient(ellipse at center, #1a0a00 0%, #0a0400 40%, #000 100%);
+  background:
+    radial-gradient(ellipse at center, #1a1510 0%, #0e0b08 40%, #050403 100%);
   overflow: hidden;
   user-select: none;
   padding: 20px;
 }
 
-/* ── Background Particles ───────────────────────────────────────── */
-.bg-particles {
+/* Subtle dust/grain overlay */
+.aztec-calendar-container::before {
+  content: "";
   position: absolute;
   inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
   pointer-events: none;
   z-index: 0;
-}
-
-.particle {
-  position: absolute;
-  width: 2px;
-  height: 2px;
-  background: #FFD700;
-  border-radius: 50%;
-  opacity: 0;
-  animation: particleFloat linear infinite;
-}
-
-@keyframes particleFloat {
-  0% {
-    opacity: 0;
-    transform: translateY(0) scale(0);
-  }
-  20% {
-    opacity: 0.8;
-    transform: translateY(-20px) scale(1);
-  }
-  80% {
-    opacity: 0.4;
-    transform: translateY(-80px) scale(0.8);
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-120px) scale(0);
-  }
+  opacity: 0.5;
 }
 
 /* ── Title ──────────────────────────────────────────────────────── */
 .aztec-title {
   font-family: "Georgia", "Times New Roman", serif;
   font-size: clamp(1.8rem, 4vw, 3rem);
-  color: #FFD700;
+  color: #A0917E;
   text-align: center;
   letter-spacing: 0.3em;
   text-transform: uppercase;
   margin: 0 0 4px;
   text-shadow:
-    0 0 20px rgba(255, 215, 0, 0.4),
-    0 0 40px rgba(255, 140, 0, 0.2);
+    0 1px 0 #685A4E,
+    0 2px 4px rgba(0, 0, 0, 0.6);
   z-index: 1;
   position: relative;
 }
@@ -73,23 +48,24 @@
 .title-glyph {
   display: inline-block;
   margin: 0 12px;
-  animation: glyphPulse 3s ease-in-out infinite;
+  color: #7A6B5D;
+  animation: glyphPulse 5s ease-in-out infinite;
 }
 
 @keyframes glyphPulse {
-  0%, 100% { opacity: 0.5; transform: scale(0.9); }
-  50% { opacity: 1; transform: scale(1.1); }
+  0%, 100% { opacity: 0.4; transform: scale(0.95); }
+  50% { opacity: 0.7; transform: scale(1.05); }
 }
 
 .aztec-subtitle {
   font-family: "Georgia", serif;
   font-size: clamp(0.75rem, 1.5vw, 1rem);
-  color: #CD853F;
+  color: #7A6B5D;
   letter-spacing: 0.15em;
   margin: 0 0 20px;
   z-index: 1;
   position: relative;
-  opacity: 0.7;
+  opacity: 0.6;
 }
 
 /* ── Calendar Wrapper ───────────────────────────────────────────── */
@@ -103,63 +79,35 @@
 .aztec-svg {
   width: 100%;
   height: 100%;
-  filter: drop-shadow(0 0 30px rgba(255, 215, 0, 0.1));
+  filter: drop-shadow(0 4px 20px rgba(0, 0, 0, 0.5));
 }
 
 /* ── Ring Styles ────────────────────────────────────────────────── */
 .aztec-ring {
   cursor: grab;
-  transition: filter 0.3s ease;
-}
-
-.aztec-ring:hover {
-  filter: url(#glow);
+  touch-action: none;
 }
 
 .aztec-ring:active {
   cursor: grabbing;
 }
 
-.ring-bg {
-  transition: opacity 0.3s ease;
-}
-
-.aztec-ring:hover .ring-bg {
-  opacity: 0.95;
-}
-
 /* ── Symbol Styles ──────────────────────────────────────────────── */
 .aztec-symbol {
-  transition: transform 0.2s ease;
+  transition: opacity 0.2s ease;
 }
 
 .aztec-symbol:hover .symbol-path {
-  opacity: 1 !important;
-  filter: url(#glow);
-}
-
-.aztec-symbol:hover .symbol-glow {
-  opacity: 0.25 !important;
-  fill: currentColor;
+  opacity: 0.85 !important;
 }
 
 .aztec-symbol.active .symbol-path {
-  filter: url(#strongGlow);
-  animation: symbolPulse 1.5s ease-in-out infinite;
+  animation: carvedPulse 2.5s ease-in-out infinite;
 }
 
-.aztec-symbol.active .symbol-glow {
-  animation: glowPulse 1.5s ease-in-out infinite;
-}
-
-@keyframes symbolPulse {
-  0%, 100% { opacity: 0.9; }
+@keyframes carvedPulse {
+  0%, 100% { opacity: 0.85; }
   50% { opacity: 1; }
-}
-
-@keyframes glowPulse {
-  0%, 100% { opacity: 0.2; r: 14; }
-  50% { opacity: 0.5; r: 18; }
 }
 
 /* ── Core Styles ────────────────────────────────────────────────── */
@@ -167,38 +115,32 @@
   pointer-events: none;
 }
 
-.core-glow {
-  transition: opacity 0.5s ease;
-}
-
-.core-glow.pulsing {
-  animation: corePulseAnim 1.5s ease-out;
+.core-pulse-ring {
+  animation: corePulseAnim 1.5s ease-out forwards;
 }
 
 @keyframes corePulseAnim {
-  0% { opacity: 1; r: 68; }
-  50% { opacity: 0.6; r: 80; }
-  100% { opacity: 1; r: 68; }
+  0% { opacity: 0.4; stroke-width: 2; }
+  50% { opacity: 0.2; stroke-width: 4; }
+  100% { opacity: 0; stroke-width: 6; }
 }
 
 .tonatiuh-face .sun-ray {
-  animation: rayRotate 20s linear infinite;
-  transform-origin: center;
+  animation: rayFlicker 8s ease-in-out infinite;
 }
 
-@keyframes rayRotate {
-  from { opacity: 0.6; }
-  50% { opacity: 1; }
-  to { opacity: 0.6; }
+@keyframes rayFlicker {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.7; }
 }
 
 .tonatiuh-face .eye {
-  animation: eyeBlink 4s ease-in-out infinite;
+  animation: eyeBlink 6s ease-in-out infinite;
 }
 
 @keyframes eyeBlink {
-  0%, 45%, 55%, 100% { r: 4; }
-  50% { r: 1; }
+  0%, 42%, 58%, 100% { opacity: 0.7; }
+  50% { opacity: 0.2; }
 }
 
 /* ── Tooltip ────────────────────────────────────────────────────── */
@@ -210,15 +152,15 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  background: rgba(10, 4, 0, 0.95);
+  background: rgba(26, 18, 10, 0.95);
   border: 1px solid;
-  border-radius: 12px;
+  border-radius: 4px;
   padding: 12px 20px;
   z-index: 100;
   backdrop-filter: blur(10px);
   box-shadow:
-    0 0 20px rgba(255, 215, 0, 0.15),
-    inset 0 1px 0 rgba(255, 215, 0, 0.1);
+    0 2px 12px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(160, 145, 126, 0.1);
 }
 
 .tooltip-text {
@@ -236,7 +178,7 @@
 
 .tooltip-detail {
   font-size: 0.75rem;
-  color: #8B7355;
+  color: #6B5B4F;
   letter-spacing: 0.05em;
 }
 
@@ -253,26 +195,26 @@
   font-family: "Georgia", serif;
   font-size: 0.85rem;
   padding: 8px 20px;
-  background: rgba(139, 69, 19, 0.3);
-  color: #CD853F;
-  border: 1px solid rgba(205, 133, 63, 0.3);
-  border-radius: 8px;
+  background: rgba(60, 50, 40, 0.5);
+  color: #9C8B7A;
+  border: 1px solid rgba(107, 91, 79, 0.4);
+  border-radius: 3px;
   cursor: pointer;
   letter-spacing: 0.08em;
   transition: all 0.3s ease;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .control-btn:hover {
-  background: rgba(139, 69, 19, 0.5);
-  border-color: #FFD700;
-  color: #FFD700;
-  box-shadow: 0 0 15px rgba(255, 215, 0, 0.2);
+  background: rgba(80, 65, 50, 0.6);
+  border-color: #A0917E;
+  color: #C4A882;
 }
 
 .control-btn.active {
-  background: rgba(255, 215, 0, 0.15);
-  border-color: #FFD700;
-  color: #FFD700;
+  background: rgba(107, 91, 79, 0.3);
+  border-color: #A0917E;
+  color: #C4A882;
 }
 
 /* ── Responsive ─────────────────────────────────────────────────── */

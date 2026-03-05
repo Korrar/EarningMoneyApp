@@ -68,26 +68,25 @@ const SYMBOL_NAMES: Record<string, string> = {
   flint: "Tecpatl",
 };
 
-// Ring color palette – deep Aztec tones
+// Stone palette – warm sandstone & basalt tones
 const RING_COLORS = [
-  { base: "#8B4513", glow: "#CD853F", accent: "#FFD700" }, // outer - Saddle Brown
-  { base: "#2F4F4F", glow: "#5F9EA0", accent: "#00CED1" }, // Dark Slate
-  { base: "#800020", glow: "#DC143C", accent: "#FF6347" }, // Burgundy
-  { base: "#1B3F2F", glow: "#228B22", accent: "#00FF7F" }, // Forest
-  { base: "#4A0E4E", glow: "#8B008B", accent: "#DA70D6" }, // Purple
-  { base: "#8B0000", glow: "#FF4500", accent: "#FF8C00" }, // Dark Red
-  { base: "#003153", glow: "#4169E1", accent: "#87CEEB" }, // Prussian Blue
-  { base: "#554400", glow: "#B8860B", accent: "#FFD700" }, // inner - Dark Gold
+  { base: "#6B5B4F", groove: "#3D3229", highlight: "#9C8B7A", accent: "#C4A882" },
+  { base: "#5A5550", groove: "#2E2B28", highlight: "#8A8580", accent: "#B0A89E" },
+  { base: "#6E5D4E", groove: "#3A3028", highlight: "#9E8D7E", accent: "#C0AD98" },
+  { base: "#555048", groove: "#2C2924", highlight: "#807B73", accent: "#A89E92" },
+  { base: "#695C50", groove: "#372F26", highlight: "#998C80", accent: "#BBA992" },
+  { base: "#5D5550", groove: "#302D28", highlight: "#8D8580", accent: "#B2A89E" },
+  { base: "#645A4E", groove: "#343028", highlight: "#948A7E", accent: "#B8A898" },
+  { base: "#584F48", groove: "#2A2622", highlight: "#887F78", accent: "#ACA298" },
 ];
 
-const CORE_COLOR = { base: "#1a0a00", glow: "#FFD700", accent: "#FFA500" };
+const CORE_COLOR = { base: "#3D3229", highlight: "#C4A882", accent: "#9C8B7A" };
 
 // ── Helpers ──────────────────────────────────────────────────────────
 const CENTER = 500;
-const RING_GAP = 4;
+const RING_GAP = 5;
 
 function getRingRadii(ringIndex: number) {
-  // Ring 0 is outermost, ring 7 is innermost
   const outerMax = 480;
   const coreRadius = 70;
   const usable = outerMax - coreRadius;
@@ -98,7 +97,6 @@ function getRingRadii(ringIndex: number) {
 }
 
 function getSymbolsForRing(ringIndex: number): (keyof typeof AZTEC_SYMBOLS)[] {
-  // Each ring has different number of symbols
   const counts = [20, 18, 16, 14, 12, 10, 8, 6];
   const count = counts[ringIndex];
   const symbols: (keyof typeof AZTEC_SYMBOLS)[] = [];
@@ -124,6 +122,9 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
   const isDragging = useRef(false);
   const lastAngle = useRef(0);
   const ringRef = useRef<SVGGElement>(null);
+  const velocityRef = useRef(0);
+  const lastTimeRef = useRef(0);
+  const momentumRef = useRef<number>(0);
 
   const getAngle = useCallback(
     (clientX: number, clientY: number) => {
@@ -141,9 +142,13 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       e.stopPropagation();
+      e.preventDefault();
       isDragging.current = true;
+      velocityRef.current = 0;
+      lastTimeRef.current = performance.now();
       lastAngle.current = getAngle(e.clientX, e.clientY);
       (e.target as Element).setPointerCapture(e.pointerId);
+      cancelAnimationFrame(momentumRef.current);
     },
     [getAngle]
   );
@@ -151,10 +156,18 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (!isDragging.current) return;
+      e.preventDefault();
+      const now = performance.now();
       const currentAngle = getAngle(e.clientX, e.clientY);
       let delta = currentAngle - lastAngle.current;
       if (delta > 180) delta -= 360;
       if (delta < -180) delta += 360;
+
+      const dt = now - lastTimeRef.current;
+      if (dt > 0) {
+        velocityRef.current = delta / dt * 16; // velocity per frame
+      }
+      lastTimeRef.current = now;
       lastAngle.current = currentAngle;
       onRotate(index, delta);
     },
@@ -163,23 +176,81 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
 
   const handlePointerUp = useCallback(() => {
     isDragging.current = false;
-  }, []);
+    // Momentum / inertia
+    let vel = velocityRef.current;
+    const decay = () => {
+      if (Math.abs(vel) < 0.05) return;
+      vel *= 0.94;
+      onRotate(index, vel);
+      momentumRef.current = requestAnimationFrame(decay);
+    };
+    momentumRef.current = requestAnimationFrame(decay);
+  }, [index, onRotate]);
 
-  // Decorative ring border pattern
-  const dashArray = `${(Math.PI * 2 * outer) / (symbols.length * 2)} ${
-    (Math.PI * 2 * outer) / (symbols.length * 2)
-  }`;
+  // Generate chisel tick marks around the ring
+  const ticks = symbols.length * 2;
+  const tickMarks = Array.from({ length: ticks }).map((_, i) => {
+    const angle = (360 / ticks) * i;
+    const rad = (angle * Math.PI) / 180;
+    const r1 = outer - 1;
+    const r2 = outer - 3;
+    return (
+      <line
+        key={`tick-${i}`}
+        x1={CENTER + Math.cos(rad) * r1}
+        y1={CENTER + Math.sin(rad) * r1}
+        x2={CENTER + Math.cos(rad) * r2}
+        y2={CENTER + Math.sin(rad) * r2}
+        stroke={colors.highlight}
+        strokeWidth={0.5}
+        opacity={0.3}
+      />
+    );
+  });
+
+  // Divider lines between symbols
+  const dividers = symbols.map((_, i) => {
+    const angle = (360 / symbols.length) * i - 90 + (360 / symbols.length) / 2;
+    const rad = (angle * Math.PI) / 180;
+    return (
+      <line
+        key={`div-${i}`}
+        x1={CENTER + Math.cos(rad) * (inner + 2)}
+        y1={CENTER + Math.sin(rad) * (inner + 2)}
+        x2={CENTER + Math.cos(rad) * (outer - 2)}
+        y2={CENTER + Math.sin(rad) * (outer - 2)}
+        stroke={colors.groove}
+        strokeWidth={1.2}
+        opacity={0.5}
+      />
+    );
+  });
 
   return (
     <g
       ref={ringRef}
-      style={{ transform: `rotate(${rotation}deg)`, transformOrigin: `${CENTER}px ${CENTER}px` }}
+      style={{
+        transform: `rotate(${rotation}deg)`,
+        transformOrigin: `${CENTER}px ${CENTER}px`,
+        touchAction: "none",
+      }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
       className="aztec-ring"
     >
-      {/* Ring background */}
+      {/* Ring stone background - outer bevel (light) */}
+      <circle
+        cx={CENTER}
+        cy={CENTER}
+        r={outer - 0.5}
+        fill="none"
+        stroke={colors.highlight}
+        strokeWidth={1.5}
+        opacity={0.5}
+      />
+      {/* Ring stone body */}
       <circle
         cx={CENTER}
         cy={CENTER}
@@ -187,34 +258,27 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
         fill="none"
         stroke={colors.base}
         strokeWidth={width}
-        opacity={0.85}
-        className="ring-bg"
+        opacity={0.92}
+        filter="url(#stoneTexture)"
       />
-
-      {/* Outer decorative border */}
+      {/* Inner bevel (shadow) */}
       <circle
         cx={CENTER}
         cy={CENTER}
-        r={outer - 1}
+        r={inner + 0.5}
         fill="none"
-        stroke={colors.glow}
-        strokeWidth={2}
-        opacity={0.6}
-        strokeDasharray={dashArray}
-      />
-
-      {/* Inner decorative border */}
-      <circle
-        cx={CENTER}
-        cy={CENTER}
-        r={inner + 1}
-        fill="none"
-        stroke={colors.glow}
+        stroke={colors.groove}
         strokeWidth={1.5}
-        opacity={0.4}
+        opacity={0.6}
       />
 
-      {/* Symbols */}
+      {/* Chisel tick marks */}
+      {tickMarks}
+
+      {/* Section dividers */}
+      {dividers}
+
+      {/* Symbols carved into stone */}
       {symbols.map((symbolKey, i) => {
         const angle = (360 / symbols.length) * i - 90;
         const rad = (angle * Math.PI) / 180;
@@ -235,20 +299,33 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
             className={`aztec-symbol ${isActive ? "active" : ""}`}
             style={{ cursor: "pointer" }}
           >
-            {/* Symbol glow background */}
-            <circle
-              r={14}
-              fill={isActive ? colors.accent : "transparent"}
-              opacity={isActive ? 0.3 : 0}
-              className="symbol-glow"
-            />
+            {/* Carved groove (shadow behind symbol) */}
             <path
               d={AZTEC_SYMBOLS[symbolKey]}
-              fill={isActive ? colors.accent : colors.glow}
-              opacity={isActive ? 1 : 0.7}
-              stroke={isActive ? "#fff" : colors.accent}
-              strokeWidth={isActive ? 1 : 0.5}
+              fill="none"
+              stroke={colors.groove}
+              strokeWidth={3}
+              opacity={0.6}
+              transform="translate(0.8, 0.8)"
+            />
+            {/* Symbol highlight edge (top-left light) */}
+            <path
+              d={AZTEC_SYMBOLS[symbolKey]}
+              fill="none"
+              stroke={colors.highlight}
+              strokeWidth={1.5}
+              opacity={isActive ? 0.8 : 0.35}
+              transform="translate(-0.4, -0.4)"
+            />
+            {/* Main symbol body */}
+            <path
+              d={AZTEC_SYMBOLS[symbolKey]}
+              fill={isActive ? colors.accent : colors.highlight}
+              opacity={isActive ? 0.9 : 0.55}
+              stroke={colors.groove}
+              strokeWidth={0.8}
               className="symbol-path"
+              filter={isActive ? "url(#carvedGlow)" : "none"}
             />
           </g>
         );
@@ -261,65 +338,128 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
 function Core({ pulse }: { pulse: boolean }) {
   return (
     <g className="aztec-core">
-      {/* Core glow */}
+      {/* Core stone disc */}
       <circle
         cx={CENTER}
         cy={CENTER}
         r={68}
-        fill="url(#coreGradient)"
-        className={`core-glow ${pulse ? "pulsing" : ""}`}
+        fill={CORE_COLOR.base}
+        filter="url(#stoneTexture)"
+        stroke={CORE_COLOR.accent}
+        strokeWidth={2}
+        opacity={0.9}
       />
-      {/* Core ring */}
+      {/* Inner ring bevel */}
       <circle
         cx={CENTER}
         cy={CENTER}
         r={60}
         fill="url(#coreInnerGradient)"
-        stroke={CORE_COLOR.glow}
-        strokeWidth={3}
+        stroke={CORE_COLOR.highlight}
+        strokeWidth={2}
+        filter="url(#stoneTexture)"
       />
+      {/* Outer chisel ring */}
+      <circle
+        cx={CENTER}
+        cy={CENTER}
+        r={65}
+        fill="none"
+        stroke={CORE_COLOR.accent}
+        strokeWidth={0.8}
+        strokeDasharray="3 5"
+        opacity={0.4}
+      />
+
       {/* Tonatiuh face – central sun */}
       <g transform={`translate(${CENTER}, ${CENTER})`} className="tonatiuh-face">
-        {/* Sun rays */}
-        {Array.from({ length: 12 }).map((_, i) => {
-          const angle = (360 / 12) * i;
+        {/* Sun rays as carved notches */}
+        {Array.from({ length: 16 }).map((_, i) => {
+          const angle = (360 / 16) * i;
           const rad = (angle * Math.PI) / 180;
+          const isLong = i % 2 === 0;
           return (
-            <line
-              key={i}
-              x1={Math.cos(rad) * 25}
-              y1={Math.sin(rad) * 25}
-              x2={Math.cos(rad) * 45}
-              y2={Math.sin(rad) * 45}
-              stroke={CORE_COLOR.glow}
-              strokeWidth={2}
-              opacity={0.8}
-              className="sun-ray"
-            />
+            <g key={i}>
+              {/* Shadow */}
+              <line
+                x1={Math.cos(rad) * 24 + 0.5}
+                y1={Math.sin(rad) * 24 + 0.5}
+                x2={Math.cos(rad) * (isLong ? 46 : 38) + 0.5}
+                y2={Math.sin(rad) * (isLong ? 46 : 38) + 0.5}
+                stroke={CORE_COLOR.base}
+                strokeWidth={isLong ? 3 : 2}
+                opacity={0.8}
+              />
+              {/* Highlight */}
+              <line
+                x1={Math.cos(rad) * 24}
+                y1={Math.sin(rad) * 24}
+                x2={Math.cos(rad) * (isLong ? 46 : 38)}
+                y2={Math.sin(rad) * (isLong ? 46 : 38)}
+                stroke={CORE_COLOR.highlight}
+                strokeWidth={isLong ? 2 : 1.2}
+                opacity={0.6}
+                className="sun-ray"
+              />
+            </g>
           );
         })}
-        {/* Face circle */}
-        <circle r={22} fill={CORE_COLOR.base} stroke={CORE_COLOR.glow} strokeWidth={2} />
-        {/* Eyes */}
-        <circle cx={-7} cy={-5} r={4} fill={CORE_COLOR.glow} className="eye" />
-        <circle cx={7} cy={-5} r={4} fill={CORE_COLOR.glow} className="eye" />
-        <circle cx={-7} cy={-5} r={2} fill={CORE_COLOR.base} />
-        <circle cx={7} cy={-5} r={2} fill={CORE_COLOR.base} />
-        {/* Mouth */}
+        {/* Face circle – carved disc */}
+        <circle r={22} fill={CORE_COLOR.base} stroke={CORE_COLOR.accent} strokeWidth={1.5} />
+        <circle r={21} fill="none" stroke={CORE_COLOR.highlight} strokeWidth={0.5} opacity={0.3} />
+        {/* Eyes – carved hollows */}
+        <ellipse cx={-7} cy={-5} rx={4} ry={3.5} fill={CORE_COLOR.base} stroke={CORE_COLOR.highlight} strokeWidth={1} opacity={0.9} />
+        <ellipse cx={7} cy={-5} rx={4} ry={3.5} fill={CORE_COLOR.base} stroke={CORE_COLOR.highlight} strokeWidth={1} opacity={0.9} />
+        <circle cx={-7} cy={-5} r={1.5} fill={CORE_COLOR.highlight} opacity={0.7} className="eye" />
+        <circle cx={7} cy={-5} r={1.5} fill={CORE_COLOR.highlight} opacity={0.7} className="eye" />
+        {/* Nose */}
+        <path d="M-2,-1 L0,-3 L2,-1" fill="none" stroke={CORE_COLOR.accent} strokeWidth={1} opacity={0.5} />
+        {/* Mouth – carved groove */}
         <path
           d="M-8,6 Q-4,12 0,8 Q4,12 8,6"
           fill="none"
-          stroke={CORE_COLOR.glow}
-          strokeWidth={2}
+          stroke={CORE_COLOR.highlight}
+          strokeWidth={1.5}
+          opacity={0.6}
         />
-        {/* Forehead decoration */}
         <path
-          d="M-10,-12 L0,-18 L10,-12"
+          d="M-8,6 Q-4,12 0,8 Q4,12 8,6"
+          fill="none"
+          stroke={CORE_COLOR.base}
+          strokeWidth={1.5}
+          opacity={0.4}
+          transform="translate(0.5, 0.5)"
+        />
+        {/* Forehead decoration – carved lines */}
+        <path
+          d="M-12,-14 L0,-20 L12,-14"
           fill="none"
           stroke={CORE_COLOR.accent}
-          strokeWidth={1.5}
+          strokeWidth={1.2}
+          opacity={0.5}
+        />
+        <path
+          d="M-8,-12 L0,-16 L8,-12"
+          fill="none"
+          stroke={CORE_COLOR.highlight}
+          strokeWidth={0.8}
+          opacity={0.3}
         />
       </g>
+
+      {/* Subtle pulse overlay */}
+      {pulse && (
+        <circle
+          cx={CENTER}
+          cy={CENTER}
+          r={68}
+          fill="none"
+          stroke={CORE_COLOR.highlight}
+          strokeWidth={2}
+          opacity={0.4}
+          className="core-pulse-ring"
+        />
+      )}
     </g>
   );
 }
@@ -350,7 +490,7 @@ function SymbolTooltip({
         <path
           d={AZTEC_SYMBOLS[symbolKey]}
           fill={colors.accent}
-          stroke={colors.glow}
+          stroke={colors.groove}
           strokeWidth={1}
         />
       </svg>
@@ -402,13 +542,13 @@ export default function AztecCalendar() {
     [activeSymbol]
   );
 
-  // Auto-rotate effect
+  // Auto-rotate effect – slow, stone-grinding feel
   useEffect(() => {
     let prevTime = performance.now();
-    const speeds = [0.08, -0.06, 0.1, -0.07, 0.05, -0.09, 0.07, -0.04];
+    const speeds = [0.04, -0.03, 0.05, -0.035, 0.025, -0.045, 0.035, -0.02];
 
     const animate = (time: number) => {
-      const dt = (time - prevTime) / 16.67; // normalize to ~60fps
+      const dt = (time - prevTime) / 16.67;
       prevTime = time;
       if (autoRotateRef.current) {
         setRotations((prev) =>
@@ -424,22 +564,6 @@ export default function AztecCalendar() {
 
   return (
     <div className="aztec-calendar-container">
-      {/* Background particles */}
-      <div className="bg-particles">
-        {Array.from({ length: 30 }).map((_, i) => (
-          <div
-            key={i}
-            className="particle"
-            style={{
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`,
-              animationDelay: `${Math.random() * 8}s`,
-              animationDuration: `${4 + Math.random() * 6}s`,
-            }}
-          />
-        ))}
-      </div>
-
       <h1 className="aztec-title">
         <span className="title-glyph">&#x2726;</span>
         Tonalpohualli
@@ -451,55 +575,110 @@ export default function AztecCalendar() {
         <svg
           viewBox="0 0 1000 1000"
           className="aztec-svg"
+          style={{ touchAction: "none" }}
         >
           <defs>
-            {/* Core gradients */}
-            <radialGradient id="coreGradient" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#FFD700" stopOpacity={0.4} />
-              <stop offset="70%" stopColor="#FF8C00" stopOpacity={0.2} />
-              <stop offset="100%" stopColor="#8B4513" stopOpacity={0} />
-            </radialGradient>
-            <radialGradient id="coreInnerGradient" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#2a1500" />
-              <stop offset="100%" stopColor="#0a0400" />
-            </radialGradient>
-            {/* Background radial glow */}
-            <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#FFD700" stopOpacity={0.05} />
-              <stop offset="50%" stopColor="#8B4513" stopOpacity={0.03} />
-              <stop offset="100%" stopColor="#000" stopOpacity={0} />
-            </radialGradient>
-            {/* Filters */}
-            <filter id="glow">
-              <feGaussianBlur stdDeviation="3" result="blur" />
+            {/* Stone texture filter */}
+            <filter id="stoneTexture" x="-5%" y="-5%" width="110%" height="110%">
+              <feTurbulence
+                type="fractalNoise"
+                baseFrequency="0.65"
+                numOctaves="4"
+                stitchTiles="stitch"
+                result="noise"
+              />
+              <feColorMatrix
+                in="noise"
+                type="saturate"
+                values="0"
+                result="grayNoise"
+              />
+              <feBlend in="SourceGraphic" in2="grayNoise" mode="multiply" result="textured" />
+              <feComposite in="textured" in2="SourceGraphic" operator="in" />
+            </filter>
+
+            {/* Carved glow for active symbols */}
+            <filter id="carvedGlow" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="1.5" result="blur" />
               <feMerge>
                 <feMergeNode in="blur" />
                 <feMergeNode in="SourceGraphic" />
               </feMerge>
             </filter>
-            <filter id="strongGlow">
-              <feGaussianBlur stdDeviation="6" result="blur" />
+
+            {/* Bevel/emboss for overall stone look */}
+            <filter id="stoneBevel" x="-2%" y="-2%" width="104%" height="104%">
+              <feGaussianBlur in="SourceAlpha" stdDeviation="1" result="blur" />
+              <feOffset in="blur" dx="-1" dy="-1" result="lightOffset" />
+              <feOffset in="blur" dx="1" dy="1" result="shadowOffset" />
+              <feFlood floodColor="#C4A882" floodOpacity="0.3" result="lightColor" />
+              <feFlood floodColor="#1a1008" floodOpacity="0.4" result="shadowColor" />
+              <feComposite in="lightColor" in2="lightOffset" operator="in" result="light" />
+              <feComposite in="shadowColor" in2="shadowOffset" operator="in" result="shadow" />
               <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="blur" />
+                <feMergeNode in="shadow" />
+                <feMergeNode in="light" />
                 <feMergeNode in="SourceGraphic" />
               </feMerge>
+            </filter>
+
+            {/* Core gradients */}
+            <radialGradient id="coreInnerGradient" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#4A3D2F" />
+              <stop offset="100%" stopColor="#2A1F15" />
+            </radialGradient>
+
+            {/* Overall stone disc background */}
+            <radialGradient id="stoneDiscGradient" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#4A4038" stopOpacity={0.15} />
+              <stop offset="70%" stopColor="#2A2420" stopOpacity={0.08} />
+              <stop offset="100%" stopColor="#000" stopOpacity={0} />
+            </radialGradient>
+
+            {/* Crack pattern */}
+            <filter id="cracks" x="0%" y="0%" width="100%" height="100%">
+              <feTurbulence type="turbulence" baseFrequency="0.015" numOctaves="2" result="crack" />
+              <feColorMatrix in="crack" type="matrix"
+                values="0 0 0 0 0.15
+                        0 0 0 0 0.12
+                        0 0 0 0 0.08
+                        0 0 0 -2.5 1.2"
+                result="crackColor" />
+              <feComposite in="crackColor" in2="SourceGraphic" operator="in" />
             </filter>
           </defs>
 
-          {/* Background glow */}
-          <circle cx={CENTER} cy={CENTER} r={490} fill="url(#bgGlow)" />
+          {/* Stone disc background */}
+          <circle cx={CENTER} cy={CENTER} r={490} fill="url(#stoneDiscGradient)" />
 
-          {/* Outermost decorative ring */}
+          {/* Weathered outer edge */}
           <circle
             cx={CENTER}
             cy={CENTER}
             r={488}
             fill="none"
-            stroke="#8B4513"
+            stroke="#6B5B4F"
+            strokeWidth={3}
+            opacity={0.25}
+          />
+          <circle
+            cx={CENTER}
+            cy={CENTER}
+            r={486}
+            fill="none"
+            stroke="#3D3229"
             strokeWidth={1}
-            opacity={0.3}
-            strokeDasharray="4 8"
+            opacity={0.4}
+          />
+
+          {/* Surface cracks overlay */}
+          <circle
+            cx={CENTER}
+            cy={CENTER}
+            r={485}
+            fill="#2a2018"
+            opacity={0.15}
+            filter="url(#cracks)"
           />
 
           {/* Rings – outer to inner */}
