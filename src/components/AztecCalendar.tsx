@@ -746,10 +746,11 @@ export default function AztecCalendar() {
     const combo = secretCombos[bestComboIdx];
     const ringGlows: number[] = [];
     const newlyLocked: boolean[] = [];
+    const isAutoRotating = autoRotateRef.current;
 
     for (let r = 0; r < 8; r++) {
-      // Already locked rings stay at full glow
-      if (ringLocksRef.current[r]) {
+      // Already locked rings stay at full glow (only in manual mode)
+      if (!isAutoRotating && ringLocksRef.current[r]) {
         ringGlows.push(1);
         newlyLocked.push(false);
         continue;
@@ -764,8 +765,9 @@ export default function AztecCalendar() {
     return { ringGlows, newlyLocked };
   }, [rotations, secretCombos]);
 
-  // Apply new locks persistently
+  // Apply new locks persistently (only in manual mode)
   useEffect(() => {
+    if (autoRotate) return; // don't lock during auto-rotate
     let changed = false;
     const updated = [...ringLocks];
     for (let r = 0; r < 8; r++) {
@@ -783,7 +785,7 @@ export default function AztecCalendar() {
         wasUnlockedRef.current = true;
       }
     }
-  }, [alignmentState, ringLocks]);
+  }, [alignmentState, ringLocks, autoRotate]);
 
   const handleRotate = useCallback((index: number, delta: number) => {
     setAutoRotate(false);
