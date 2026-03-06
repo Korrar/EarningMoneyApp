@@ -429,6 +429,17 @@ function stopRingOsc(ringIndex: number) {
   if (timer) { clearTimeout(timer); ringFadeTimers.current.delete(ringIndex); }
 }
 
+/** Stop ALL ring oscillators immediately */
+function stopAllRingTones() {
+  for (const idx of Array.from(ringOscillators.current.keys())) {
+    stopRingOsc(idx);
+  }
+  for (const timer of Array.from(ringFadeTimers.current.values())) {
+    clearTimeout(timer);
+  }
+  ringFadeTimers.current.clear();
+}
+
 function playRingTone(ringIndex: number, speed: number) {
   const ctx = getRingAudioCtx();
   if (!ctx) return;
@@ -493,7 +504,6 @@ class AmbientMusic {
   private masterGain: GainNode | null = null;
   private isPlaying = false;
   private oscillators: OscillatorNode[] = [];
-  private pendingTimeout: ReturnType<typeof setTimeout> | null = null;
   private windPlaying = false;
   private noiseBuffer: AudioBuffer | null = null;
   // Generation counter prevents stale callbacks from old sessions
@@ -651,7 +661,6 @@ class AmbientMusic {
     if (this.windTimer) { clearTimeout(this.windTimer); this.windTimer = null; }
     if (this.melodyTimer) { clearTimeout(this.melodyTimer); this.melodyTimer = null; }
     if (this.heartbeatTimer) { clearTimeout(this.heartbeatTimer); this.heartbeatTimer = null; }
-    if (this.pendingTimeout) { clearTimeout(this.pendingTimeout); this.pendingTimeout = null; }
   }
 
   /** Immediate full teardown — no delayed cleanup */
@@ -670,25 +679,9 @@ class AmbientMusic {
     if (!this.isPlaying) return;
     this.isPlaying = false;
     this.generation++; // Invalidates all pending schedule callbacks
-    this.cancelTimers();
 
-    // Fade out master volume, then clean up
-    if (this.masterGain && this.ctx) {
-      try {
-        this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-        this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, this.ctx.currentTime);
-        this.masterGain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.8);
-      } catch { /* */ }
-    }
-
-    // Cleanup after fade (but guard against start() being called in between)
-    const gen = this.generation;
-    this.pendingTimeout = setTimeout(() => {
-      // Only clean up if no new start() happened
-      if (gen === this.generation) {
-        this.hardCleanup();
-      }
-    }, 1000);
+    // Immediate full teardown — no delayed cleanup to avoid race conditions
+    this.hardCleanup();
   }
 
   get playing() { return this.isPlaying; }
@@ -1236,6 +1229,8 @@ export default function AztecCalendar() {
         updated[r] = true;
         changed = true;
         playLockClick();
+        // Stop ring tone for this locked ring
+        stopRingOsc(r);
         // Lock particles
         const lockPs = createLockParticles(r);
         particlesRef.current = [...particlesRef.current, ...lockPs];
@@ -1245,6 +1240,8 @@ export default function AztecCalendar() {
     if (changed) {
       setRingLocks(updated);
       if (updated.every(Boolean) && !wasUnlockedRef.current) {
+        // Stop all ring tones on full unlock
+        stopAllRingTones();
         // Crack + shockwave animation
         setCracking(true);
         const crackPs = createCrackParticles();
@@ -1368,9 +1365,12 @@ export default function AztecCalendar() {
     }
   }, [musicPlaying]);
 
-  // Cleanup music on unmount
+  // Cleanup all audio on unmount
   useEffect(() => {
-    return () => { ambientMusic.stop(); };
+    return () => {
+      ambientMusic.stop();
+      stopAllRingTones();
+    };
   }, []);
 
   // Get tonalpohualli day
@@ -1593,6 +1593,7 @@ export default function AztecCalendar() {
           onClick={() => {
             const next = !autoRotate;
             setAutoRotate(next);
+            stopAllRingTones();
             if (next) {
               setRingLocks(Array(8).fill(false));
               prevLocksRef.current = Array(8).fill(false);
@@ -1607,6 +1608,9 @@ export default function AztecCalendar() {
         <button
           className="control-btn"
           onClick={() => {
+            stopAllRingTones();
+            ambientMusic.stop();
+            setMusicPlaying(false);
             setRotations(Array(8).fill(0));
             setRingLocks(Array(8).fill(false));
             prevLocksRef.current = Array(8).fill(false);
