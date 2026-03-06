@@ -454,11 +454,16 @@ class AmbientMusic {
   private masterGain: GainNode | null = null;
   private isPlaying = false;
   private oscillators: OscillatorNode[] = [];
-  private intervalIds: ReturnType<typeof setInterval>[] = [];
+  private timeoutIds: ReturnType<typeof setTimeout>[] = [];
+  private windPlaying = false;
+  private noiseBuffer: AudioBuffer | null = null;
 
   start() {
     if (this.isPlaying) return;
     try {
+      // Clean up any previous context fully before creating a new one
+      this.cleanup();
+
       this.ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
@@ -466,19 +471,23 @@ class AmbientMusic {
       this.masterGain.connect(this.ctx.destination);
       this.isPlaying = true;
 
-      // Deep drone pad
+      // Pre-create noise buffer once (avoids repeated allocation)
+      const bufferSize = this.ctx.sampleRate * 4;
+      this.noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = this.noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * 0.5;
+      }
+
+      // Deep drone pad (continuous, non-overlapping)
       this.createDrone(55, "sine", 0.08);
       this.createDrone(82.5, "sine", 0.04);
       this.createDrone(110, "triangle", 0.025);
 
-      // Breathy wind texture
-      this.createWindTexture();
-
-      // Pentatonic melody pings
-      this.createMelody();
-
-      // Slow drum heartbeat
-      this.createHeartbeat();
+      // Schedule non-overlapping one-shot events via setTimeout chains
+      this.scheduleWind();
+      this.scheduleMelody();
+      this.scheduleHeartbeat();
     } catch { /* Audio not available */ }
   }
 
@@ -504,19 +513,22 @@ class AmbientMusic {
     this.oscillators.push(osc, lfo);
   }
 
-  private createWindTexture() {
-    if (!this.ctx || !this.masterGain) return;
-    const bufferSize = this.ctx.sampleRate * 4;
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * 0.5;
+  private scheduleWind() {
+    if (!this.isPlaying || !this.ctx || !this.masterGain || !this.noiseBuffer) return;
+
+    // Don't overlap wind sounds — wait if one is still playing
+    if (this.windPlaying) {
+      const id = setTimeout(() => this.scheduleWind(), 2000);
+      this.timeoutIds.push(id);
+      return;
     }
 
-    const playWind = () => {
-      if (!this.ctx || !this.masterGain || !this.isPlaying) return;
+    this.windPlaying = true;
+    const duration = 4;
+
+    try {
       const noise = this.ctx.createBufferSource();
-      noise.buffer = buffer;
+      noise.buffer = this.noiseBuffer;
       const gain = this.ctx.createGain();
       const filter = this.ctx.createBiquadFilter();
       filter.type = "bandpass";
@@ -524,23 +536,30 @@ class AmbientMusic {
       filter.Q.setValueAtTime(2, this.ctx.currentTime);
       gain.gain.setValueAtTime(0, this.ctx.currentTime);
       gain.gain.linearRampToValueAtTime(0.03, this.ctx.currentTime + 2);
-      gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 4);
+      gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + duration);
       noise.connect(filter).connect(gain).connect(this.masterGain!);
       noise.start();
-      noise.stop(this.ctx.currentTime + 4);
-    };
+      noise.stop(this.ctx.currentTime + duration);
+      noise.onended = () => { this.windPlaying = false; };
+    } catch {
+      this.windPlaying = false;
+    }
 
-    playWind();
-    this.intervalIds.push(setInterval(playWind, 5000));
+    // Schedule next wind AFTER this one finishes + random gap
+    const nextDelay = (duration + 2 + Math.random() * 4) * 1000;
+    const id = setTimeout(() => this.scheduleWind(), nextDelay);
+    this.timeoutIds.push(id);
   }
 
-  private createMelody() {
-    // Aztec pentatonic: D minor pentatonic
-    const notes = [146.83, 164.81, 174.61, 220, 261.63, 293.66, 329.63];
+  private scheduleMelody() {
+    if (!this.isPlaying || !this.ctx || !this.masterGain) return;
 
-    const playNote = () => {
-      if (!this.ctx || !this.masterGain || !this.isPlaying) return;
-      const freq = notes[Math.floor(Math.random() * notes.length)];
+    // Aztec pentatonic scale
+    const notes = [146.83, 164.81, 174.61, 220, 261.63, 293.66, 329.63];
+    const freq = notes[Math.floor(Math.random() * notes.length)];
+    const noteDuration = 2 + Math.random() * 2;
+
+    try {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       const filter = this.ctx.createBiquadFilter();
@@ -551,18 +570,22 @@ class AmbientMusic {
       filter.frequency.setValueAtTime(800, this.ctx.currentTime);
       gain.gain.setValueAtTime(0, this.ctx.currentTime);
       gain.gain.linearRampToValueAtTime(0.04 + Math.random() * 0.03, this.ctx.currentTime + 0.1);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 2 + Math.random() * 2);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + noteDuration);
       osc.connect(filter).connect(gain).connect(this.masterGain!);
       osc.start();
-      osc.stop(this.ctx.currentTime + 4);
-    };
+      osc.stop(this.ctx.currentTime + noteDuration + 0.1);
+    } catch { /* */ }
 
-    this.intervalIds.push(setInterval(playNote, 3000 + Math.random() * 4000));
+    // Schedule next note AFTER this one ends + random silence gap
+    const nextDelay = (noteDuration + 1 + Math.random() * 5) * 1000;
+    const id = setTimeout(() => this.scheduleMelody(), nextDelay);
+    this.timeoutIds.push(id);
   }
 
-  private createHeartbeat() {
-    const playBeat = () => {
-      if (!this.ctx || !this.masterGain || !this.isPlaying) return;
+  private scheduleHeartbeat() {
+    if (!this.isPlaying || !this.ctx || !this.masterGain) return;
+
+    try {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = "sine";
@@ -573,24 +596,42 @@ class AmbientMusic {
       osc.connect(gain).connect(this.masterGain!);
       osc.start();
       osc.stop(this.ctx.currentTime + 0.6);
-    };
+    } catch { /* */ }
 
-    this.intervalIds.push(setInterval(playBeat, 4000));
+    // Steady heartbeat every 4-5s
+    const id = setTimeout(() => this.scheduleHeartbeat(), 4000 + Math.random() * 1000);
+    this.timeoutIds.push(id);
+  }
+
+  private cleanup() {
+    this.timeoutIds.forEach(clearTimeout);
+    this.timeoutIds = [];
+    this.oscillators.forEach(o => { try { o.stop(); } catch { /* */ } });
+    this.oscillators = [];
+    this.windPlaying = false;
+    this.noiseBuffer = null;
+    try { this.ctx?.close(); } catch { /* */ }
+    this.ctx = null;
+    this.masterGain = null;
   }
 
   stop() {
     this.isPlaying = false;
-    this.intervalIds.forEach(clearInterval);
-    this.intervalIds = [];
+    // Cancel all scheduled events immediately
+    this.timeoutIds.forEach(clearTimeout);
+    this.timeoutIds = [];
+
+    // Fade out master volume smoothly
     if (this.masterGain && this.ctx) {
-      this.masterGain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 1);
+      try {
+        this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
+        this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, this.ctx.currentTime);
+        this.masterGain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 1);
+      } catch { /* */ }
     }
-    setTimeout(() => {
-      this.oscillators.forEach(o => { try { o.stop(); } catch { /* */ } });
-      this.oscillators = [];
-      try { this.ctx?.close(); } catch { /* */ }
-      this.ctx = null;
-    }, 1500);
+
+    // Full cleanup after fade-out completes
+    setTimeout(() => this.cleanup(), 1200);
   }
 
   get playing() { return this.isPlaying; }
