@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════
-   Aztec Calendar – Tonalpohualli – Stone Carved
-   Realistic stone tablet with carved relief symbols
+   Aztec Calendar – Tonalpohualli – Pastel Stone
+   Stone tablet with pastel matte tones and secret unlock mechanic
    ═══════════════════════════════════════════════════════════════════ */
 
 /* ── Base Container ─────────────────────────────────────────────── */
@@ -16,9 +16,15 @@
   overflow: hidden;
   user-select: none;
   padding: 20px;
+  transition: background 1.5s ease;
 }
 
-/* Subtle dust/grain overlay */
+.aztec-calendar-container.unlocked {
+  background:
+    radial-gradient(ellipse at center, #2a2018 0%, #1a1510 40%, #0a0805 100%);
+}
+
+/* Grain overlay */
 .aztec-calendar-container::before {
   content: "";
   position: absolute;
@@ -43,6 +49,14 @@
     0 2px 4px rgba(0, 0, 0, 0.6);
   z-index: 1;
   position: relative;
+  transition: color 0.8s ease;
+}
+
+.unlocked .aztec-title {
+  color: #D4C5B5;
+  text-shadow:
+    0 0 20px rgba(212, 197, 181, 0.3),
+    0 1px 0 #685A4E;
 }
 
 .title-glyph {
@@ -62,10 +76,32 @@
   font-size: clamp(0.75rem, 1.5vw, 1rem);
   color: #7A6B5D;
   letter-spacing: 0.15em;
-  margin: 0 0 20px;
+  margin: 0 0 8px;
   z-index: 1;
   position: relative;
   opacity: 0.6;
+}
+
+/* ── Lock Indicator ────────────────────────────────────────────── */
+.lock-indicator {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  z-index: 1;
+  position: relative;
+}
+
+.lock-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: all 0.4s ease;
+  border: 1px solid rgba(160, 145, 126, 0.2);
+}
+
+.lock-dot.locked {
+  transform: scale(1.3);
+  border-color: transparent;
 }
 
 /* ── Calendar Wrapper ───────────────────────────────────────────── */
@@ -80,16 +116,26 @@
   width: 100%;
   height: 100%;
   filter: drop-shadow(0 4px 20px rgba(0, 0, 0, 0.5));
+  transition: filter 1s ease;
+}
+
+.unlocked .aztec-svg {
+  filter: drop-shadow(0 0 40px rgba(212, 197, 181, 0.2));
 }
 
 /* ── Ring Styles ────────────────────────────────────────────────── */
 .aztec-ring {
   cursor: grab;
   touch-action: none;
+  transition: filter 0.5s ease;
 }
 
 .aztec-ring:active {
   cursor: grabbing;
+}
+
+.ring-unlocked {
+  filter: url(#alignGlow);
 }
 
 /* ── Symbol Styles ──────────────────────────────────────────────── */
@@ -125,6 +171,24 @@
   100% { opacity: 0; stroke-width: 6; }
 }
 
+.core-unlock-glow {
+  animation: coreUnlockPulse 2s ease-in-out infinite;
+}
+
+@keyframes coreUnlockPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.8; }
+}
+
+.full-unlock-glow {
+  animation: fullGlowPulse 3s ease-in-out infinite;
+}
+
+@keyframes fullGlowPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+
 .tonatiuh-face .sun-ray {
   animation: rayFlicker 8s ease-in-out infinite;
 }
@@ -141,6 +205,35 @@
 @keyframes eyeBlink {
   0%, 42%, 58%, 100% { opacity: 0.7; }
   50% { opacity: 0.2; }
+}
+
+/* ── Alignment Marker ──────────────────────────────────────────── */
+.alignment-marker {
+  pointer-events: none;
+}
+
+/* ── Unlock Message ────────────────────────────────────────────── */
+.unlock-message {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: "Georgia", serif;
+  font-size: clamp(1.5rem, 4vw, 2.5rem);
+  color: #D4C5B5;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  text-shadow:
+    0 0 30px rgba(212, 197, 181, 0.5),
+    0 0 60px rgba(196, 168, 130, 0.3);
+  z-index: 200;
+  pointer-events: none;
+  animation: unlockTextPulse 2s ease-in-out infinite;
+}
+
+@keyframes unlockTextPulse {
+  0%, 100% { opacity: 0.8; text-shadow: 0 0 30px rgba(212, 197, 181, 0.5); }
+  50% { opacity: 1; text-shadow: 0 0 50px rgba(212, 197, 181, 0.8), 0 0 80px rgba(196, 168, 130, 0.4); }
 }
 
 /* ── Tooltip ────────────────────────────────────────────────────── */
@@ -225,7 +318,11 @@
   }
 
   .aztec-subtitle {
-    margin-bottom: 10px;
+    margin-bottom: 6px;
+  }
+
+  .lock-indicator {
+    margin-bottom: 8px;
   }
 
   .controls {

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import "./AztecCalendar.css";
 
@@ -68,16 +68,16 @@ const SYMBOL_NAMES: Record<string, string> = {
   flint: "Tecpatl",
 };
 
-// Stone palette – warm sandstone & basalt tones
+// Pastel matte stone palette
 const RING_COLORS = [
-  { base: "#6B5B4F", groove: "#3D3229", highlight: "#9C8B7A", accent: "#C4A882" },
-  { base: "#5A5550", groove: "#2E2B28", highlight: "#8A8580", accent: "#B0A89E" },
-  { base: "#6E5D4E", groove: "#3A3028", highlight: "#9E8D7E", accent: "#C0AD98" },
-  { base: "#555048", groove: "#2C2924", highlight: "#807B73", accent: "#A89E92" },
-  { base: "#695C50", groove: "#372F26", highlight: "#998C80", accent: "#BBA992" },
-  { base: "#5D5550", groove: "#302D28", highlight: "#8D8580", accent: "#B2A89E" },
-  { base: "#645A4E", groove: "#343028", highlight: "#948A7E", accent: "#B8A898" },
-  { base: "#584F48", groove: "#2A2622", highlight: "#887F78", accent: "#ACA298" },
+  { base: "#8E7F72", groove: "#5A4D42", highlight: "#C4B5A6", accent: "#D4C5B5", pastel: "#C9A9A0" }, // dusty rose stone
+  { base: "#7A8478", groove: "#4A5248", highlight: "#B0BAA8", accent: "#C0CAB8", pastel: "#A3B8A0" }, // sage green
+  { base: "#847B8E", groove: "#524A5A", highlight: "#B4ABB8", accent: "#C8BFD0", pastel: "#B8A8C8" }, // lavender stone
+  { base: "#8E8478", groove: "#5A5048", highlight: "#C0B4A8", accent: "#D0C4B8", pastel: "#C8B89C" }, // warm sand
+  { base: "#78848E", groove: "#485058", highlight: "#A8B4BE", accent: "#B8C4CE", pastel: "#9CB8C8" }, // sky blue stone
+  { base: "#8E7E7A", groove: "#5A4C48", highlight: "#C0AEA8", accent: "#D0BEB8", pastel: "#C8A8A0" }, // terracotta matte
+  { base: "#7E8A78", groove: "#4C5648", highlight: "#AEB8A8", accent: "#BEC8B8", pastel: "#A8C0A0" }, // moss
+  { base: "#88807C", groove: "#565048", highlight: "#B8B0AA", accent: "#C8C0BA", pastel: "#B8A898" }, // warm gray
 ];
 
 const CORE_COLOR = { base: "#3D3229", highlight: "#C4A882", accent: "#9C8B7A" };
@@ -85,6 +85,7 @@ const CORE_COLOR = { base: "#3D3229", highlight: "#C4A882", accent: "#9C8B7A" };
 // ── Helpers ──────────────────────────────────────────────────────────
 const CENTER = 500;
 const RING_GAP = 5;
+const SYMBOL_COUNTS = [20, 18, 16, 14, 12, 10, 8, 6];
 
 function getRingRadii(ringIndex: number) {
   const outerMax = 480;
@@ -97,13 +98,132 @@ function getRingRadii(ringIndex: number) {
 }
 
 function getSymbolsForRing(ringIndex: number): (keyof typeof AZTEC_SYMBOLS)[] {
-  const counts = [20, 18, 16, 14, 12, 10, 8, 6];
-  const count = counts[ringIndex];
+  const count = SYMBOL_COUNTS[ringIndex];
   const symbols: (keyof typeof AZTEC_SYMBOLS)[] = [];
   for (let i = 0; i < count; i++) {
     symbols.push(SYMBOL_KEYS[i % SYMBOL_KEYS.length]);
   }
   return symbols;
+}
+
+// ── Secret Combinations ─────────────────────────────────────────────
+// Each combination is an array of 8 target symbol indices (one per ring).
+// When each ring's target symbol is aligned to the top (angle ~270° in SVG = top),
+// the combination triggers.
+function generateSecretCombinations(seed: number) {
+  // Seeded pseudo-random for reproducibility per session
+  let s = seed;
+  const rand = () => {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+
+  const combos: number[][] = [];
+  for (let c = 0; c < 3; c++) {
+    const combo: number[] = [];
+    for (let r = 0; r < 8; r++) {
+      combo.push(Math.floor(rand() * SYMBOL_COUNTS[r]));
+    }
+    combos.push(combo);
+  }
+  return combos;
+}
+
+// Check how close a ring is to its target alignment
+function getRingAlignmentError(rotation: number, ringIndex: number, targetSymbol: number): number {
+  const count = SYMBOL_COUNTS[ringIndex];
+  const symbolAngle = (360 / count) * targetSymbol; // angle of that symbol
+  // We want symbol to be at the top = -90° from right = 270°
+  // The symbol is placed at angle (360/count)*i - 90, so at i=targetSymbol it's at symbolAngle-90
+  // With rotation applied, the symbol sits at symbolAngle - 90 + rotation
+  // We want that to be -90 (top), so rotation should be -symbolAngle (mod 360)
+  const targetRotation = -symbolAngle;
+  let diff = ((rotation - targetRotation) % 360 + 540) % 360 - 180;
+  return Math.abs(diff);
+}
+
+// ── Deep Click Sound via Web Audio ──────────────────────────────────
+function playDeepClick() {
+  try {
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+
+    // Deep resonant thud
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+
+    // Sub bass hit
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(55, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(25, ctx.currentTime + 0.6);
+    gain.gain.setValueAtTime(0.8, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+
+    // Stone click overtone
+    osc2.type = "triangle";
+    osc2.frequency.setValueAtTime(120, ctx.currentTime);
+    osc2.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.3);
+    gain2.gain.setValueAtTime(0.4, ctx.currentTime);
+    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+
+    // Noise burst for stone texture
+    const bufferSize = ctx.sampleRate * 0.15;
+    const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const noiseData = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      noiseData[i] = (Math.random() * 2 - 1) * 0.3;
+    }
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer;
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.25, ctx.currentTime);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+
+    // Low pass for warmth
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(200, ctx.currentTime);
+
+    osc.connect(gain).connect(filter).connect(ctx.destination);
+    osc2.connect(gain2).connect(filter);
+    noise.connect(noiseGain).connect(filter);
+
+    osc.start(ctx.currentTime);
+    osc2.start(ctx.currentTime);
+    noise.start(ctx.currentTime);
+
+    osc.stop(ctx.currentTime + 0.8);
+    osc2.stop(ctx.currentTime + 0.4);
+    noise.stop(ctx.currentTime + 0.15);
+
+    setTimeout(() => ctx.close(), 1500);
+  } catch {
+    // Audio not available
+  }
+}
+
+// Play a subtle ring-lock click (lighter version)
+function playLockClick() {
+  try {
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(80, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(35, ctx.currentTime + 0.2);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(150, ctx.currentTime);
+    osc.connect(gain).connect(filter).connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.25);
+    setTimeout(() => ctx.close(), 500);
+  } catch {
+    // Audio not available
+  }
 }
 
 // ── Ring Component ───────────────────────────────────────────────────
@@ -113,9 +233,11 @@ interface RingProps {
   onRotate: (index: number, delta: number) => void;
   activeSymbol: { ring: number; symbol: number } | null;
   onSymbolClick: (ring: number, symbol: number) => void;
+  glowIntensity: number; // 0-1, how close to alignment
+  unlocked: boolean;
 }
 
-function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingProps) {
+function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick, glowIntensity, unlocked }: RingProps) {
   const { outer, inner, mid, width } = getRingRadii(index);
   const colors = RING_COLORS[index];
   const symbols = getSymbolsForRing(index);
@@ -162,10 +284,9 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
       let delta = currentAngle - lastAngle.current;
       if (delta > 180) delta -= 360;
       if (delta < -180) delta += 360;
-
       const dt = now - lastTimeRef.current;
       if (dt > 0) {
-        velocityRef.current = delta / dt * 16; // velocity per frame
+        velocityRef.current = delta / dt * 16;
       }
       lastTimeRef.current = now;
       lastAngle.current = currentAngle;
@@ -176,7 +297,6 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
 
   const handlePointerUp = useCallback(() => {
     isDragging.current = false;
-    // Momentum / inertia
     let vel = velocityRef.current;
     const decay = () => {
       if (Math.abs(vel) < 0.05) return;
@@ -187,7 +307,7 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
     momentumRef.current = requestAnimationFrame(decay);
   }, [index, onRotate]);
 
-  // Generate chisel tick marks around the ring
+  // Chisel tick marks
   const ticks = symbols.length * 2;
   const tickMarks = Array.from({ length: ticks }).map((_, i) => {
     const angle = (360 / ticks) * i;
@@ -208,7 +328,7 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
     );
   });
 
-  // Divider lines between symbols
+  // Divider lines
   const dividers = symbols.map((_, i) => {
     const angle = (360 / symbols.length) * i - 90 + (360 / symbols.length) / 2;
     const rad = (angle * Math.PI) / 180;
@@ -226,6 +346,10 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
     );
   });
 
+  // Glow color based on pastel
+  const glowColor = colors.pastel;
+  const glowOpacity = glowIntensity * 0.6;
+
   return (
     <g
       ref={ringRef}
@@ -238,17 +362,31 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
-      className="aztec-ring"
+      className={`aztec-ring ${unlocked ? "ring-unlocked" : ""}`}
     >
-      {/* Ring stone background - outer bevel (light) */}
+      {/* Glow layer behind ring when aligned */}
+      {glowIntensity > 0.1 && (
+        <circle
+          cx={CENTER}
+          cy={CENTER}
+          r={mid}
+          fill="none"
+          stroke={glowColor}
+          strokeWidth={width + 6}
+          opacity={glowOpacity * 0.3}
+          filter="url(#alignGlow)"
+        />
+      )}
+
+      {/* Ring stone background - outer bevel */}
       <circle
         cx={CENTER}
         cy={CENTER}
         r={outer - 0.5}
         fill="none"
-        stroke={colors.highlight}
+        stroke={glowIntensity > 0.5 ? glowColor : colors.highlight}
         strokeWidth={1.5}
-        opacity={0.5}
+        opacity={0.5 + glowIntensity * 0.3}
       />
       {/* Ring stone body */}
       <circle
@@ -261,7 +399,7 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
         opacity={0.92}
         filter="url(#stoneTexture)"
       />
-      {/* Inner bevel (shadow) */}
+      {/* Inner bevel */}
       <circle
         cx={CENTER}
         cy={CENTER}
@@ -272,13 +410,10 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
         opacity={0.6}
       />
 
-      {/* Chisel tick marks */}
       {tickMarks}
-
-      {/* Section dividers */}
       {dividers}
 
-      {/* Symbols carved into stone */}
+      {/* Symbols */}
       {symbols.map((symbolKey, i) => {
         const angle = (360 / symbols.length) * i - 90;
         const rad = (angle * Math.PI) / 180;
@@ -287,6 +422,18 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
         const isActive =
           activeSymbol?.ring === index && activeSymbol?.symbol === i;
         const scale = width / 55;
+
+        // Pastel tint for symbols when ring is glowing
+        const symbolFill = unlocked
+          ? colors.pastel
+          : isActive
+            ? colors.accent
+            : colors.highlight;
+        const symbolOpacity = unlocked
+          ? 0.9
+          : isActive
+            ? 0.9
+            : 0.55;
 
         return (
           <g
@@ -299,7 +446,7 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
             className={`aztec-symbol ${isActive ? "active" : ""}`}
             style={{ cursor: "pointer" }}
           >
-            {/* Carved groove (shadow behind symbol) */}
+            {/* Carved groove */}
             <path
               d={AZTEC_SYMBOLS[symbolKey]}
               fill="none"
@@ -308,24 +455,24 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
               opacity={0.6}
               transform="translate(0.8, 0.8)"
             />
-            {/* Symbol highlight edge (top-left light) */}
+            {/* Highlight edge */}
             <path
               d={AZTEC_SYMBOLS[symbolKey]}
               fill="none"
-              stroke={colors.highlight}
+              stroke={unlocked ? colors.pastel : colors.highlight}
               strokeWidth={1.5}
-              opacity={isActive ? 0.8 : 0.35}
+              opacity={isActive || unlocked ? 0.8 : 0.35}
               transform="translate(-0.4, -0.4)"
             />
             {/* Main symbol body */}
             <path
               d={AZTEC_SYMBOLS[symbolKey]}
-              fill={isActive ? colors.accent : colors.highlight}
-              opacity={isActive ? 0.9 : 0.55}
+              fill={symbolFill}
+              opacity={symbolOpacity}
               stroke={colors.groove}
               strokeWidth={0.8}
               className="symbol-path"
-              filter={isActive ? "url(#carvedGlow)" : "none"}
+              filter={isActive ? "url(#carvedGlow)" : unlocked ? "url(#alignGlow)" : "none"}
             />
           </g>
         );
@@ -335,9 +482,21 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick }: RingPr
 }
 
 // ── Core Component ───────────────────────────────────────────────────
-function Core({ pulse }: { pulse: boolean }) {
+function Core({ pulse, unlocked }: { pulse: boolean; unlocked: boolean }) {
   return (
     <g className="aztec-core">
+      {/* Unlocked glow behind core */}
+      {unlocked && (
+        <circle
+          cx={CENTER}
+          cy={CENTER}
+          r={85}
+          fill="url(#unlockRadial)"
+          opacity={0.7}
+          className="core-unlock-glow"
+        />
+      )}
+
       {/* Core stone disc */}
       <circle
         cx={CENTER}
@@ -345,8 +504,8 @@ function Core({ pulse }: { pulse: boolean }) {
         r={68}
         fill={CORE_COLOR.base}
         filter="url(#stoneTexture)"
-        stroke={CORE_COLOR.accent}
-        strokeWidth={2}
+        stroke={unlocked ? "#D4C5B5" : CORE_COLOR.accent}
+        strokeWidth={unlocked ? 3 : 2}
         opacity={0.9}
       />
       {/* Inner ring bevel */}
@@ -359,7 +518,6 @@ function Core({ pulse }: { pulse: boolean }) {
         strokeWidth={2}
         filter="url(#stoneTexture)"
       />
-      {/* Outer chisel ring */}
       <circle
         cx={CENTER}
         cy={CENTER}
@@ -371,16 +529,15 @@ function Core({ pulse }: { pulse: boolean }) {
         opacity={0.4}
       />
 
-      {/* Tonatiuh face – central sun */}
+      {/* Tonatiuh face */}
       <g transform={`translate(${CENTER}, ${CENTER})`} className="tonatiuh-face">
-        {/* Sun rays as carved notches */}
+        {/* Sun rays */}
         {Array.from({ length: 16 }).map((_, i) => {
           const angle = (360 / 16) * i;
           const rad = (angle * Math.PI) / 180;
           const isLong = i % 2 === 0;
           return (
             <g key={i}>
-              {/* Shadow */}
               <line
                 x1={Math.cos(rad) * 24 + 0.5}
                 y1={Math.sin(rad) * 24 + 0.5}
@@ -390,64 +547,32 @@ function Core({ pulse }: { pulse: boolean }) {
                 strokeWidth={isLong ? 3 : 2}
                 opacity={0.8}
               />
-              {/* Highlight */}
               <line
                 x1={Math.cos(rad) * 24}
                 y1={Math.sin(rad) * 24}
                 x2={Math.cos(rad) * (isLong ? 46 : 38)}
                 y2={Math.sin(rad) * (isLong ? 46 : 38)}
-                stroke={CORE_COLOR.highlight}
+                stroke={unlocked ? "#D4C5B5" : CORE_COLOR.highlight}
                 strokeWidth={isLong ? 2 : 1.2}
-                opacity={0.6}
+                opacity={unlocked ? 0.9 : 0.6}
                 className="sun-ray"
               />
             </g>
           );
         })}
-        {/* Face circle – carved disc */}
-        <circle r={22} fill={CORE_COLOR.base} stroke={CORE_COLOR.accent} strokeWidth={1.5} />
+        <circle r={22} fill={CORE_COLOR.base} stroke={unlocked ? "#D4C5B5" : CORE_COLOR.accent} strokeWidth={1.5} />
         <circle r={21} fill="none" stroke={CORE_COLOR.highlight} strokeWidth={0.5} opacity={0.3} />
-        {/* Eyes – carved hollows */}
         <ellipse cx={-7} cy={-5} rx={4} ry={3.5} fill={CORE_COLOR.base} stroke={CORE_COLOR.highlight} strokeWidth={1} opacity={0.9} />
         <ellipse cx={7} cy={-5} rx={4} ry={3.5} fill={CORE_COLOR.base} stroke={CORE_COLOR.highlight} strokeWidth={1} opacity={0.9} />
-        <circle cx={-7} cy={-5} r={1.5} fill={CORE_COLOR.highlight} opacity={0.7} className="eye" />
-        <circle cx={7} cy={-5} r={1.5} fill={CORE_COLOR.highlight} opacity={0.7} className="eye" />
-        {/* Nose */}
+        <circle cx={-7} cy={-5} r={1.5} fill={unlocked ? "#D4C5B5" : CORE_COLOR.highlight} opacity={unlocked ? 1 : 0.7} className="eye" />
+        <circle cx={7} cy={-5} r={1.5} fill={unlocked ? "#D4C5B5" : CORE_COLOR.highlight} opacity={unlocked ? 1 : 0.7} className="eye" />
         <path d="M-2,-1 L0,-3 L2,-1" fill="none" stroke={CORE_COLOR.accent} strokeWidth={1} opacity={0.5} />
-        {/* Mouth – carved groove */}
-        <path
-          d="M-8,6 Q-4,12 0,8 Q4,12 8,6"
-          fill="none"
-          stroke={CORE_COLOR.highlight}
-          strokeWidth={1.5}
-          opacity={0.6}
-        />
-        <path
-          d="M-8,6 Q-4,12 0,8 Q4,12 8,6"
-          fill="none"
-          stroke={CORE_COLOR.base}
-          strokeWidth={1.5}
-          opacity={0.4}
-          transform="translate(0.5, 0.5)"
-        />
-        {/* Forehead decoration – carved lines */}
-        <path
-          d="M-12,-14 L0,-20 L12,-14"
-          fill="none"
-          stroke={CORE_COLOR.accent}
-          strokeWidth={1.2}
-          opacity={0.5}
-        />
-        <path
-          d="M-8,-12 L0,-16 L8,-12"
-          fill="none"
-          stroke={CORE_COLOR.highlight}
-          strokeWidth={0.8}
-          opacity={0.3}
-        />
+        <path d="M-8,6 Q-4,12 0,8 Q4,12 8,6" fill="none" stroke={CORE_COLOR.highlight} strokeWidth={1.5} opacity={0.6} />
+        <path d="M-8,6 Q-4,12 0,8 Q4,12 8,6" fill="none" stroke={CORE_COLOR.base} strokeWidth={1.5} opacity={0.4} transform="translate(0.5, 0.5)" />
+        <path d="M-12,-14 L0,-20 L12,-14" fill="none" stroke={CORE_COLOR.accent} strokeWidth={1.2} opacity={0.5} />
+        <path d="M-8,-12 L0,-16 L8,-12" fill="none" stroke={CORE_COLOR.highlight} strokeWidth={0.8} opacity={0.3} />
       </g>
 
-      {/* Subtle pulse overlay */}
       {pulse && (
         <circle
           cx={CENTER}
@@ -465,13 +590,7 @@ function Core({ pulse }: { pulse: boolean }) {
 }
 
 // ── Tooltip Component ────────────────────────────────────────────────
-function SymbolTooltip({
-  ring,
-  symbol,
-}: {
-  ring: number;
-  symbol: number;
-}) {
+function SymbolTooltip({ ring, symbol }: { ring: number; symbol: number }) {
   const symbols = getSymbolsForRing(ring);
   const symbolKey = symbols[symbol];
   const name = SYMBOL_NAMES[symbolKey] || symbolKey;
@@ -484,40 +603,111 @@ function SymbolTooltip({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -10, scale: 0.9 }}
       transition={{ duration: 0.3 }}
-      style={{ borderColor: colors.accent }}
+      style={{ borderColor: colors.pastel }}
     >
       <svg width={40} height={40} viewBox="-15 -15 30 30">
-        <path
-          d={AZTEC_SYMBOLS[symbolKey]}
-          fill={colors.accent}
-          stroke={colors.groove}
-          strokeWidth={1}
-        />
+        <path d={AZTEC_SYMBOLS[symbolKey]} fill={colors.pastel} stroke={colors.groove} strokeWidth={1} />
       </svg>
       <div className="tooltip-text">
-        <span className="tooltip-name" style={{ color: colors.accent }}>
-          {name}
-        </span>
-        <span className="tooltip-detail">
-          Ring {8 - ring} · Position {symbol + 1}
-        </span>
+        <span className="tooltip-name" style={{ color: colors.pastel }}>{name}</span>
+        <span className="tooltip-detail">Ring {8 - ring} · Position {symbol + 1}</span>
       </div>
     </motion.div>
+  );
+}
+
+// ── Alignment Indicator ──────────────────────────────────────────────
+function AlignmentMarker() {
+  // Small triangle at the top pointing down
+  return (
+    <g className="alignment-marker">
+      <polygon
+        points={`${CENTER - 6},22 ${CENTER + 6},22 ${CENTER},32`}
+        fill="#9C8B7A"
+        opacity={0.6}
+        stroke="#5A4D42"
+        strokeWidth={1}
+      />
+    </g>
   );
 }
 
 // ── Main Calendar ────────────────────────────────────────────────────
 export default function AztecCalendar() {
   const [rotations, setRotations] = useState<number[]>(Array(8).fill(0));
-  const [activeSymbol, setActiveSymbol] = useState<{
-    ring: number;
-    symbol: number;
-  } | null>(null);
+  const [activeSymbol, setActiveSymbol] = useState<{ ring: number; symbol: number } | null>(null);
   const [corePulse, setCorePulse] = useState(false);
   const [autoRotate, setAutoRotate] = useState(true);
+  const [unlocked, setUnlocked] = useState(false);
+  const [ringLocks, setRingLocks] = useState<boolean[]>(Array(8).fill(false));
   const animFrameRef = useRef<number>(0);
   const autoRotateRef = useRef(autoRotate);
   autoRotateRef.current = autoRotate;
+  const prevLocksRef = useRef<boolean[]>(Array(8).fill(false));
+  const wasUnlockedRef = useRef(false);
+
+  // Generate 3 secret combos per session
+  const secretCombos = useMemo(() => {
+    const seed = Math.floor(Math.random() * 100000);
+    return generateSecretCombinations(seed);
+  }, []);
+
+  // Compute alignment state for best matching combo
+  const alignmentState = useMemo(() => {
+    const LOCK_THRESHOLD = 8; // degrees tolerance for a ring to count as "locked"
+    let bestComboIdx = 0;
+    let bestLockedCount = 0;
+
+    for (let c = 0; c < secretCombos.length; c++) {
+      let locked = 0;
+      for (let r = 0; r < 8; r++) {
+        const err = getRingAlignmentError(rotations[r], r, secretCombos[c][r]);
+        if (err < LOCK_THRESHOLD) locked++;
+      }
+      if (locked > bestLockedCount) {
+        bestLockedCount = locked;
+        bestComboIdx = c;
+      }
+    }
+
+    const combo = secretCombos[bestComboIdx];
+    const ringErrors: number[] = [];
+    const ringGlows: number[] = [];
+    const locked: boolean[] = [];
+
+    for (let r = 0; r < 8; r++) {
+      const err = getRingAlignmentError(rotations[r], r, combo[r]);
+      ringErrors.push(err);
+      locked.push(err < LOCK_THRESHOLD);
+      // Glow ramps up from 30° down to 0°
+      const glowRange = 30;
+      ringGlows.push(err < glowRange ? Math.max(0, 1 - err / glowRange) : 0);
+    }
+
+    return { ringGlows, locked, allLocked: locked.every(Boolean) };
+  }, [rotations, secretCombos]);
+
+  // Detect new ring locks and full unlock
+  useEffect(() => {
+    const prevLocks = prevLocksRef.current;
+    for (let r = 0; r < 8; r++) {
+      if (alignmentState.locked[r] && !prevLocks[r]) {
+        playLockClick();
+        break; // only one sound per frame
+      }
+    }
+    prevLocksRef.current = [...alignmentState.locked];
+
+    if (alignmentState.allLocked && !wasUnlockedRef.current) {
+      setUnlocked(true);
+      playDeepClick();
+      wasUnlockedRef.current = true;
+    } else if (!alignmentState.allLocked) {
+      if (wasUnlockedRef.current) setUnlocked(false);
+      wasUnlockedRef.current = false;
+    }
+    setRingLocks(alignmentState.locked);
+  }, [alignmentState]);
 
   const handleRotate = useCallback((index: number, delta: number) => {
     setAutoRotate(false);
@@ -542,59 +732,66 @@ export default function AztecCalendar() {
     [activeSymbol]
   );
 
-  // Auto-rotate effect – slow, stone-grinding feel
+  // Auto-rotate
   useEffect(() => {
     let prevTime = performance.now();
     const speeds = [0.04, -0.03, 0.05, -0.035, 0.025, -0.045, 0.035, -0.02];
-
     const animate = (time: number) => {
       const dt = (time - prevTime) / 16.67;
       prevTime = time;
       if (autoRotateRef.current) {
-        setRotations((prev) =>
-          prev.map((r, i) => r + speeds[i] * dt)
-        );
+        setRotations((prev) => prev.map((r, i) => r + speeds[i] * dt));
       }
       animFrameRef.current = requestAnimationFrame(animate);
     };
-
     animFrameRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animFrameRef.current);
   }, []);
 
   return (
-    <div className="aztec-calendar-container">
+    <div className={`aztec-calendar-container ${unlocked ? "unlocked" : ""}`}>
       <h1 className="aztec-title">
         <span className="title-glyph">&#x2726;</span>
         Tonalpohualli
         <span className="title-glyph">&#x2726;</span>
       </h1>
-      <p className="aztec-subtitle">Sacred Aztec Calendar · Drag rings to rotate</p>
+      <p className="aztec-subtitle">
+        Sacred Aztec Calendar · Align the symbols to unlock
+      </p>
+
+      {/* Lock progress indicator */}
+      <div className="lock-indicator">
+        {ringLocks.map((locked, i) => (
+          <div
+            key={i}
+            className={`lock-dot ${locked ? "locked" : ""}`}
+            style={{
+              backgroundColor: locked ? RING_COLORS[i].pastel : RING_COLORS[i].groove,
+              boxShadow: locked ? `0 0 8px ${RING_COLORS[i].pastel}` : "none",
+            }}
+          />
+        ))}
+      </div>
 
       <div className="calendar-wrapper">
-        <svg
-          viewBox="0 0 1000 1000"
-          className="aztec-svg"
-          style={{ touchAction: "none" }}
-        >
+        <svg viewBox="0 0 1000 1000" className="aztec-svg" style={{ touchAction: "none" }}>
           <defs>
             {/* Stone texture filter */}
             <filter id="stoneTexture" x="-5%" y="-5%" width="110%" height="110%">
-              <feTurbulence
-                type="fractalNoise"
-                baseFrequency="0.65"
-                numOctaves="4"
-                stitchTiles="stitch"
-                result="noise"
-              />
-              <feColorMatrix
-                in="noise"
-                type="saturate"
-                values="0"
-                result="grayNoise"
-              />
+              <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="4" stitchTiles="stitch" result="noise" />
+              <feColorMatrix in="noise" type="saturate" values="0" result="grayNoise" />
               <feBlend in="SourceGraphic" in2="grayNoise" mode="multiply" result="textured" />
               <feComposite in="textured" in2="SourceGraphic" operator="in" />
+            </filter>
+
+            {/* Alignment glow */}
+            <filter id="alignGlow" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="4" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
             </filter>
 
             {/* Carved glow for active symbols */}
@@ -606,32 +803,22 @@ export default function AztecCalendar() {
               </feMerge>
             </filter>
 
-            {/* Bevel/emboss for overall stone look */}
-            <filter id="stoneBevel" x="-2%" y="-2%" width="104%" height="104%">
-              <feGaussianBlur in="SourceAlpha" stdDeviation="1" result="blur" />
-              <feOffset in="blur" dx="-1" dy="-1" result="lightOffset" />
-              <feOffset in="blur" dx="1" dy="1" result="shadowOffset" />
-              <feFlood floodColor="#C4A882" floodOpacity="0.3" result="lightColor" />
-              <feFlood floodColor="#1a1008" floodOpacity="0.4" result="shadowColor" />
-              <feComposite in="lightColor" in2="lightOffset" operator="in" result="light" />
-              <feComposite in="shadowColor" in2="shadowOffset" operator="in" result="shadow" />
-              <feMerge>
-                <feMergeNode in="shadow" />
-                <feMergeNode in="light" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-
             {/* Core gradients */}
             <radialGradient id="coreInnerGradient" cx="50%" cy="50%" r="50%">
               <stop offset="0%" stopColor="#4A3D2F" />
               <stop offset="100%" stopColor="#2A1F15" />
             </radialGradient>
 
-            {/* Overall stone disc background */}
             <radialGradient id="stoneDiscGradient" cx="50%" cy="50%" r="50%">
               <stop offset="0%" stopColor="#4A4038" stopOpacity={0.15} />
               <stop offset="70%" stopColor="#2A2420" stopOpacity={0.08} />
+              <stop offset="100%" stopColor="#000" stopOpacity={0} />
+            </radialGradient>
+
+            {/* Unlock radial glow */}
+            <radialGradient id="unlockRadial" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#D4C5B5" stopOpacity={0.6} />
+              <stop offset="50%" stopColor="#C4A882" stopOpacity={0.3} />
               <stop offset="100%" stopColor="#000" stopOpacity={0} />
             </radialGradient>
 
@@ -639,10 +826,7 @@ export default function AztecCalendar() {
             <filter id="cracks" x="0%" y="0%" width="100%" height="100%">
               <feTurbulence type="turbulence" baseFrequency="0.015" numOctaves="2" result="crack" />
               <feColorMatrix in="crack" type="matrix"
-                values="0 0 0 0 0.15
-                        0 0 0 0 0.12
-                        0 0 0 0 0.08
-                        0 0 0 -2.5 1.2"
+                values="0 0 0 0 0.15 0 0 0 0 0.12 0 0 0 0 0.08 0 0 0 -2.5 1.2"
                 result="crackColor" />
               <feComposite in="crackColor" in2="SourceGraphic" operator="in" />
             </filter>
@@ -651,37 +835,26 @@ export default function AztecCalendar() {
           {/* Stone disc background */}
           <circle cx={CENTER} cy={CENTER} r={490} fill="url(#stoneDiscGradient)" />
 
-          {/* Weathered outer edge */}
-          <circle
-            cx={CENTER}
-            cy={CENTER}
-            r={488}
-            fill="none"
-            stroke="#6B5B4F"
-            strokeWidth={3}
-            opacity={0.25}
-          />
-          <circle
-            cx={CENTER}
-            cy={CENTER}
-            r={486}
-            fill="none"
-            stroke="#3D3229"
-            strokeWidth={1}
-            opacity={0.4}
-          />
+          {/* Outer edge */}
+          <circle cx={CENTER} cy={CENTER} r={488} fill="none" stroke="#6B5B4F" strokeWidth={3} opacity={0.25} />
+          <circle cx={CENTER} cy={CENTER} r={486} fill="none" stroke="#3D3229" strokeWidth={1} opacity={0.4} />
 
-          {/* Surface cracks overlay */}
-          <circle
-            cx={CENTER}
-            cy={CENTER}
-            r={485}
-            fill="#2a2018"
-            opacity={0.15}
-            filter="url(#cracks)"
-          />
+          {/* Surface cracks */}
+          <circle cx={CENTER} cy={CENTER} r={485} fill="#2a2018" opacity={0.15} filter="url(#cracks)" />
 
-          {/* Rings – outer to inner */}
+          {/* Unlock glow behind everything */}
+          {unlocked && (
+            <circle
+              cx={CENTER}
+              cy={CENTER}
+              r={485}
+              fill="url(#unlockRadial)"
+              opacity={0.5}
+              className="full-unlock-glow"
+            />
+          )}
+
+          {/* Rings */}
           {Array.from({ length: 8 }).map((_, i) => (
             <Ring
               key={i}
@@ -690,11 +863,16 @@ export default function AztecCalendar() {
               onRotate={handleRotate}
               activeSymbol={activeSymbol}
               onSymbolClick={handleSymbolClick}
+              glowIntensity={alignmentState.ringGlows[i]}
+              unlocked={alignmentState.locked[i]}
             />
           ))}
 
+          {/* Alignment marker at top */}
+          <AlignmentMarker />
+
           {/* Core */}
-          <Core pulse={corePulse} />
+          <Core pulse={corePulse} unlocked={unlocked} />
         </svg>
       </div>
 
@@ -702,6 +880,21 @@ export default function AztecCalendar() {
       <AnimatePresence>
         {activeSymbol && (
           <SymbolTooltip ring={activeSymbol.ring} symbol={activeSymbol.symbol} />
+        )}
+      </AnimatePresence>
+
+      {/* Unlock message */}
+      <AnimatePresence>
+        {unlocked && (
+          <motion.div
+            className="unlock-message"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ duration: 0.5 }}
+          >
+            The Calendar Awakens
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -715,7 +908,11 @@ export default function AztecCalendar() {
         </button>
         <button
           className="control-btn"
-          onClick={() => setRotations(Array(8).fill(0))}
+          onClick={() => {
+            setRotations(Array(8).fill(0));
+            setUnlocked(false);
+            wasUnlockedRef.current = false;
+          }}
         >
           ↺ Reset
         </button>
