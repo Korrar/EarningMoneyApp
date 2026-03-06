@@ -212,28 +212,60 @@
   pointer-events: none;
 }
 
-/* ── Unlock Message ────────────────────────────────────────────── */
+/* ── Unlock Message / Prophecy ─────────────────────────────────── */
 .unlock-message {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-family: "Georgia", serif;
-  font-size: clamp(1.5rem, 4vw, 2.5rem);
-  color: #D4C5B5;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  text-shadow:
-    0 0 30px rgba(212, 197, 181, 0.5),
-    0 0 60px rgba(196, 168, 130, 0.3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: min(85vw, 520px);
+  padding: 32px 40px;
+  background: rgba(10, 6, 3, 0.92);
+  border: 1px solid rgba(212, 197, 181, 0.2);
+  border-radius: 4px;
   z-index: 200;
   pointer-events: none;
-  animation: unlockTextPulse 2s ease-in-out infinite;
+  backdrop-filter: blur(12px);
+  box-shadow:
+    0 0 60px rgba(196, 168, 130, 0.15),
+    inset 0 1px 0 rgba(212, 197, 181, 0.08);
+  animation: unlockPanelPulse 3s ease-in-out infinite;
 }
 
-@keyframes unlockTextPulse {
-  0%, 100% { opacity: 0.8; text-shadow: 0 0 30px rgba(212, 197, 181, 0.5); }
-  50% { opacity: 1; text-shadow: 0 0 50px rgba(212, 197, 181, 0.8), 0 0 80px rgba(196, 168, 130, 0.4); }
+.prophecy-label {
+  font-family: "Georgia", serif;
+  font-size: clamp(0.7rem, 1.5vw, 0.85rem);
+  color: #9C8B7A;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.prophecy-text {
+  font-family: "Georgia", serif;
+  font-size: clamp(1rem, 2.5vw, 1.4rem);
+  color: #D4C5B5;
+  text-align: center;
+  line-height: 1.7;
+  letter-spacing: 0.03em;
+  font-style: italic;
+  text-shadow:
+    0 0 20px rgba(212, 197, 181, 0.3);
+}
+
+@keyframes unlockPanelPulse {
+  0%, 100% {
+    border-color: rgba(212, 197, 181, 0.15);
+    box-shadow: 0 0 40px rgba(196, 168, 130, 0.1), inset 0 1px 0 rgba(212, 197, 181, 0.05);
+  }
+  50% {
+    border-color: rgba(212, 197, 181, 0.3);
+    box-shadow: 0 0 80px rgba(196, 168, 130, 0.2), inset 0 1px 0 rgba(212, 197, 181, 0.1);
+  }
 }
 
 /* ── Tooltip ────────────────────────────────────────────────────── */

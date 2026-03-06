@@ -106,6 +106,77 @@ function getSymbolsForRing(ringIndex: number): (keyof typeof AZTEC_SYMBOLS)[] {
   return symbols;
 }
 
+// ── Aztec Prophecy Generator ─────────────────────────────────────────
+// Unique per person (browser fingerprint) and per day
+const PROPHECIES = [
+  "The Feathered Serpent watches your path — a door long sealed shall open before dusk.",
+  "Obsidian mirrors reflect what you refuse to see. Today, look closer.",
+  "The Jaguar drinks from the river of stars tonight. Follow where the water leads.",
+  "What was planted in silence now breaks the stone. Your patience bears sacred fruit.",
+  "The wind carries a name you have forgotten. Listen before the sun touches the earth.",
+  "Thirteen steps remain between you and what you seek. The first begins now.",
+  "A shadow you cast will shelter someone today. Power lies in what you give away.",
+  "The Eagle and the Serpent meet at the crossroads. Choose neither — walk the third path.",
+  "Rain falls upward in the realm of dreams. What seems wrong is your truest direction.",
+  "The skull smiles because it knows: endings are seeds dressed in darkness.",
+  "Fire sleeps in the flint of your spoken word. Speak carefully — or speak with purpose.",
+  "The old calendar crumbles, but the count never stops. You are not late. You are aligned.",
+  "Maize grows even in forgotten fields. Abundance finds you when you stop chasing.",
+  "The Monkey God laughs at your seriousness. Play today and wisdom will follow.",
+  "A jade stone rolls toward you from the north. Wealth comes in a form you won't expect.",
+  "The temple stairs are steep but the view changes everything. Keep climbing.",
+  "Copal smoke carries your intention to the unseen. What you wished for at dawn is heard.",
+  "Two suns rise in the world of the brave. You will see both if you dare to wake early.",
+  "The Rabbit crosses the moon tonight. What you start in secret will become legend.",
+  "Quetzal feathers fall only for those who do not grasp. Release your grip on the outcome.",
+  "The Water Goddess stirs the depths. Emotions you buried will surface — let them flow.",
+  "A warrior's shield is also a mirror. Your greatest defense today is self-knowledge.",
+  "The House of the Sun accepts a new guest. You are being invited somewhere important.",
+  "Stones remember every footstep. The ground beneath you knows you belong here.",
+  "The Reed bends but records everything. Write down what comes to mind before noon.",
+  "Coyolxauhqui reassembles herself each night. What broke in you is already healing.",
+  "The Vulture circles not for death but for truth. Clarity comes from above today.",
+  "Movement is the Fifth Sun's gift. Stillness is wisdom, but today — move.",
+  "The Flint strikes and the old world ignites. Transformation chooses you, not the other way.",
+  "An ancestor places a flower on your threshold. You are remembered by those beyond the veil.",
+  "The calendar stone turns and all debts dissolve. Forgive one thing today — including yourself.",
+  "Tlaloc's tears nourish what Tonatiuh's fire tests. Both the storm and the heat serve you.",
+  "A dog spirit walks beside you unseen. Loyalty given freely returns sevenfold.",
+  "The pyramid's shadow points to buried gold. Follow what frightens you most — treasure waits.",
+  "Xochipilli sings through the cracks in your routine. Beauty interrupts your plans today.",
+  "The Earth opens to swallow the false and feed the true. Stand in your honesty.",
+  "Night birds carry messages between worlds. Pay attention to what visits your dreams.",
+  "The serpent sheds its skin at the threshold of power. What you outgrow falls away painlessly.",
+  "A merchant from a distant trecena brings rare goods. Accept unexpected gifts with grace.",
+  "The calendar's heart beats in rhythm with yours. You are not lost — you are the center.",
+];
+
+function getBrowserSeed(): number {
+  // Fingerprint from screen, timezone, language, platform
+  const raw = [
+    screen.width,
+    screen.height,
+    screen.colorDepth,
+    new Date().getTimezoneOffset(),
+    navigator.language,
+    navigator.platform,
+    navigator.hardwareConcurrency || 0,
+  ].join("|");
+  let hash = 0;
+  for (let i = 0; i < raw.length; i++) {
+    hash = ((hash << 5) - hash + raw.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function getDailyProphecy(): string {
+  const now = new Date();
+  const dayStamp = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+  const seed = (getBrowserSeed() * 31 + dayStamp * 7) >>> 0;
+  const index = seed % PROPHECIES.length;
+  return PROPHECIES[index];
+}
+
 // ── Secret Combinations ─────────────────────────────────────────────
 // Each combination is an array of 8 target symbol indices (one per ring).
 // When each ring's target symbol is aligned to the top (angle ~270° in SVG = top),
@@ -883,17 +954,18 @@ export default function AztecCalendar() {
         )}
       </AnimatePresence>
 
-      {/* Unlock message */}
+      {/* Unlock prophecy */}
       <AnimatePresence>
         {unlocked && (
           <motion.div
             className="unlock-message"
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            transition={{ duration: 0.5 }}
+            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: -20 }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
           >
-            The Calendar Awakens
+            <div className="prophecy-label">The Calendar Speaks</div>
+            <div className="prophecy-text">{getDailyProphecy()}</div>
           </motion.div>
         )}
       </AnimatePresence>
