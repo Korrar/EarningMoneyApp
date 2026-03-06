@@ -815,7 +815,8 @@ export default function AztecCalendar() {
   // Auto-rotate
   useEffect(() => {
     let prevTime = performance.now();
-    const speeds = [0.04, -0.03, 0.05, -0.035, 0.025, -0.045, 0.035, -0.02];
+    // Inner rings spin faster (ring 0=outer, ring 7=inner)
+    const speeds = [0.02, -0.03, 0.04, -0.05, 0.07, -0.09, 0.12, -0.16];
     const animate = (time: number) => {
       const dt = (time - prevTime) / 16.67;
       prevTime = time;
