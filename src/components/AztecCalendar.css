@@ -138,6 +138,10 @@
   filter: url(#alignGlow);
 }
 
+.ring-locked {
+  cursor: default;
+}
+
 /* ── Symbol Styles ──────────────────────────────────────────────── */
 .aztec-symbol {
   transition: opacity 0.2s ease;

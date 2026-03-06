@@ -429,11 +429,11 @@ function Ring({ index, rotation, onRotate, activeSymbol, onSymbolClick, glowInte
         transformOrigin: `${CENTER}px ${CENTER}px`,
         touchAction: "none",
       }}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-      className={`aztec-ring ${unlocked ? "ring-unlocked" : ""}`}
+      onPointerDown={unlocked ? undefined : handlePointerDown}
+      onPointerMove={unlocked ? undefined : handlePointerMove}
+      onPointerUp={unlocked ? undefined : handlePointerUp}
+      onPointerCancel={unlocked ? undefined : handlePointerUp}
+      className={`aztec-ring ${unlocked ? "ring-unlocked ring-locked" : ""}`}
     >
       {/* Glow layer behind ring when aligned */}
       {glowIntensity > 0.1 && (
@@ -716,6 +716,8 @@ export default function AztecCalendar() {
   autoRotateRef.current = autoRotate;
   const prevLocksRef = useRef<boolean[]>(Array(8).fill(false));
   const wasUnlockedRef = useRef(false);
+  const ringLocksRef = useRef<boolean[]>(Array(8).fill(false));
+  ringLocksRef.current = ringLocks;
 
   // Generate 3 secret combos per session
   const secretCombos = useMemo(() => {
@@ -723,66 +725,71 @@ export default function AztecCalendar() {
     return generateSecretCombinations(seed);
   }, []);
 
-  // Compute alignment state for best matching combo
+  // Compute alignment glow and detect new locks
   const alignmentState = useMemo(() => {
-    const LOCK_THRESHOLD = 8; // degrees tolerance for a ring to count as "locked"
+    const LOCK_THRESHOLD = 8;
     let bestComboIdx = 0;
-    let bestLockedCount = 0;
+    let bestScore = 0;
 
     for (let c = 0; c < secretCombos.length; c++) {
-      let locked = 0;
+      let score = 0;
       for (let r = 0; r < 8; r++) {
         const err = getRingAlignmentError(rotations[r], r, secretCombos[c][r]);
-        if (err < LOCK_THRESHOLD) locked++;
+        if (err < LOCK_THRESHOLD) score++;
       }
-      if (locked > bestLockedCount) {
-        bestLockedCount = locked;
+      if (score > bestScore) {
+        bestScore = score;
         bestComboIdx = c;
       }
     }
 
     const combo = secretCombos[bestComboIdx];
-    const ringErrors: number[] = [];
     const ringGlows: number[] = [];
-    const locked: boolean[] = [];
+    const newlyLocked: boolean[] = [];
 
     for (let r = 0; r < 8; r++) {
+      // Already locked rings stay at full glow
+      if (ringLocksRef.current[r]) {
+        ringGlows.push(1);
+        newlyLocked.push(false);
+        continue;
+      }
       const err = getRingAlignmentError(rotations[r], r, combo[r]);
-      ringErrors.push(err);
-      locked.push(err < LOCK_THRESHOLD);
-      // Glow ramps up from 30° down to 0°
+      const justLocked = err < LOCK_THRESHOLD;
+      newlyLocked.push(justLocked);
       const glowRange = 30;
       ringGlows.push(err < glowRange ? Math.max(0, 1 - err / glowRange) : 0);
     }
 
-    return { ringGlows, locked, allLocked: locked.every(Boolean) };
+    return { ringGlows, newlyLocked };
   }, [rotations, secretCombos]);
 
-  // Detect new ring locks and full unlock
+  // Apply new locks persistently
   useEffect(() => {
-    const prevLocks = prevLocksRef.current;
+    let changed = false;
+    const updated = [...ringLocks];
     for (let r = 0; r < 8; r++) {
-      if (alignmentState.locked[r] && !prevLocks[r]) {
+      if (alignmentState.newlyLocked[r] && !ringLocks[r]) {
+        updated[r] = true;
+        changed = true;
         playLockClick();
-        break; // only one sound per frame
       }
     }
-    prevLocksRef.current = [...alignmentState.locked];
-
-    if (alignmentState.allLocked && !wasUnlockedRef.current) {
-      setUnlocked(true);
-      playDeepClick();
-      wasUnlockedRef.current = true;
-    } else if (!alignmentState.allLocked) {
-      if (wasUnlockedRef.current) setUnlocked(false);
-      wasUnlockedRef.current = false;
+    if (changed) {
+      setRingLocks(updated);
+      if (updated.every(Boolean) && !wasUnlockedRef.current) {
+        setUnlocked(true);
+        playDeepClick();
+        wasUnlockedRef.current = true;
+      }
     }
-    setRingLocks(alignmentState.locked);
-  }, [alignmentState]);
+  }, [alignmentState, ringLocks]);
 
   const handleRotate = useCallback((index: number, delta: number) => {
     setAutoRotate(false);
+    // Don't rotate locked rings
     setRotations((prev) => {
+      if (ringLocksRef.current[index]) return prev;
       const next = [...prev];
       next[index] += delta;
       return next;
@@ -935,7 +942,7 @@ export default function AztecCalendar() {
               activeSymbol={activeSymbol}
               onSymbolClick={handleSymbolClick}
               glowIntensity={alignmentState.ringGlows[i]}
-              unlocked={alignmentState.locked[i]}
+              unlocked={ringLocks[i]}
             />
           ))}
 
@@ -974,7 +981,17 @@ export default function AztecCalendar() {
       <div className="controls">
         <button
           className={`control-btn ${autoRotate ? "active" : ""}`}
-          onClick={() => setAutoRotate(!autoRotate)}
+          onClick={() => {
+            const next = !autoRotate;
+            setAutoRotate(next);
+            if (next) {
+              // Auto-rotate resets all locks
+              setRingLocks(Array(8).fill(false));
+              prevLocksRef.current = Array(8).fill(false);
+              setUnlocked(false);
+              wasUnlockedRef.current = false;
+            }
+          }}
         >
           {autoRotate ? "⏸ Pause" : "▶ Auto-Rotate"}
         </button>
@@ -982,6 +999,8 @@ export default function AztecCalendar() {
           className="control-btn"
           onClick={() => {
             setRotations(Array(8).fill(0));
+            setRingLocks(Array(8).fill(false));
+            prevLocksRef.current = Array(8).fill(false);
             setUnlocked(false);
             wasUnlockedRef.current = false;
           }}
