@@ -400,40 +400,79 @@ function playLockClick() {
 
 // Per-ring rotation sound with different tones
 const ringAudioCtxRef: { current: AudioContext | null } = { current: null };
-const ringOscillators: { current: Map<number, { osc: OscillatorNode; gain: GainNode; active: boolean }> } = { current: new Map() };
+const ringOscillators: { current: Map<number, { osc: OscillatorNode; gain: GainNode; filter: BiquadFilterNode; active: boolean }> } = { current: new Map() };
+const ringFadeTimers: { current: Map<number, ReturnType<typeof setTimeout>> } = { current: new Map() };
 
 const RING_TONES = [65, 73, 82, 98, 110, 131, 147, 165]; // bass to treble
 
-function playRingTone(ringIndex: number, speed: number) {
+function getRingAudioCtx(): AudioContext | null {
   try {
     if (!ringAudioCtxRef.current || ringAudioCtxRef.current.state === "closed") {
       ringAudioCtxRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
     }
-    const ctx = ringAudioCtxRef.current;
-    if (ctx.state === "suspended") ctx.resume();
+    if (ringAudioCtxRef.current.state === "suspended") ringAudioCtxRef.current.resume();
+    return ringAudioCtxRef.current;
+  } catch {
+    return null;
+  }
+}
 
-    const absSpeed = Math.abs(speed);
-    const existing = ringOscillators.current.get(ringIndex);
+function stopRingOsc(ringIndex: number) {
+  const existing = ringOscillators.current.get(ringIndex);
+  if (!existing) return;
+  try { existing.osc.stop(); } catch { /* */ }
+  try { existing.osc.disconnect(); } catch { /* */ }
+  try { existing.gain.disconnect(); } catch { /* */ }
+  try { existing.filter.disconnect(); } catch { /* */ }
+  ringOscillators.current.delete(ringIndex);
+  const timer = ringFadeTimers.current.get(ringIndex);
+  if (timer) { clearTimeout(timer); ringFadeTimers.current.delete(ringIndex); }
+}
 
-    if (absSpeed < 0.5) {
-      if (existing?.active) {
-        existing.gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
-        existing.active = false;
-      }
-      return;
-    }
+function playRingTone(ringIndex: number, speed: number) {
+  const ctx = getRingAudioCtx();
+  if (!ctx) return;
 
-    const vol = Math.min(0.06, absSpeed * 0.01);
+  const absSpeed = Math.abs(speed);
+  const existing = ringOscillators.current.get(ringIndex);
 
+  if (absSpeed < 0.5) {
+    // Fade out and fully clean up after fade
     if (existing?.active) {
+      existing.active = false;
+      try {
+        existing.gain.gain.cancelScheduledValues(ctx.currentTime);
+        existing.gain.gain.setValueAtTime(existing.gain.gain.value, ctx.currentTime);
+        existing.gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+      } catch { /* */ }
+      // Clean up node after fade completes
+      const timer = setTimeout(() => stopRingOsc(ringIndex), 200);
+      ringFadeTimers.current.set(ringIndex, timer);
+    }
+    return;
+  }
+
+  // Cancel any pending cleanup
+  const pendingTimer = ringFadeTimers.current.get(ringIndex);
+  if (pendingTimer) { clearTimeout(pendingTimer); ringFadeTimers.current.delete(ringIndex); }
+
+  const vol = Math.min(0.06, absSpeed * 0.01);
+
+  if (existing?.active) {
+    try {
       existing.gain.gain.setTargetAtTime(vol, ctx.currentTime, 0.05);
       existing.osc.frequency.setTargetAtTime(
         RING_TONES[ringIndex] + absSpeed * 5,
         ctx.currentTime, 0.05
       );
-      return;
-    }
+    } catch { /* */ }
+    return;
+  }
 
+  // Stop old one first if it exists (lingering from fade)
+  stopRingOsc(ringIndex);
+
+  try {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     const filter = ctx.createBiquadFilter();
@@ -444,8 +483,8 @@ function playRingTone(ringIndex: number, speed: number) {
     gain.gain.setValueAtTime(vol, ctx.currentTime);
     osc.connect(gain).connect(filter).connect(ctx.destination);
     osc.start();
-    ringOscillators.current.set(ringIndex, { osc, gain, active: true });
-  } catch { /* Audio not available */ }
+    ringOscillators.current.set(ringIndex, { osc, gain, filter, active: true });
+  } catch { /* */ }
 }
 
 // Ambient Aztec music generator
@@ -454,24 +493,32 @@ class AmbientMusic {
   private masterGain: GainNode | null = null;
   private isPlaying = false;
   private oscillators: OscillatorNode[] = [];
-  private timeoutIds: ReturnType<typeof setTimeout>[] = [];
+  private pendingTimeout: ReturnType<typeof setTimeout> | null = null;
   private windPlaying = false;
   private noiseBuffer: AudioBuffer | null = null;
+  // Generation counter prevents stale callbacks from old sessions
+  private generation = 0;
+  // Single timeout per scheduled voice (wind/melody/heartbeat)
+  private windTimer: ReturnType<typeof setTimeout> | null = null;
+  private melodyTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 
   start() {
     if (this.isPlaying) return;
-    try {
-      // Clean up any previous context fully before creating a new one
-      this.cleanup();
 
+    // Synchronous full cleanup (no delayed cleanup racing with new start)
+    this.hardCleanup();
+
+    try {
       this.ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
       this.masterGain.gain.linearRampToValueAtTime(0.12, this.ctx.currentTime + 3);
       this.masterGain.connect(this.ctx.destination);
       this.isPlaying = true;
+      this.generation++;
 
-      // Pre-create noise buffer once (avoids repeated allocation)
+      // Pre-create noise buffer once
       const bufferSize = this.ctx.sampleRate * 4;
       this.noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
       const data = this.noiseBuffer.getChannelData(0);
@@ -479,15 +526,16 @@ class AmbientMusic {
         data[i] = (Math.random() * 2 - 1) * 0.5;
       }
 
-      // Deep drone pad (continuous, non-overlapping)
+      // Continuous drones
       this.createDrone(55, "sine", 0.08);
       this.createDrone(82.5, "sine", 0.04);
       this.createDrone(110, "triangle", 0.025);
 
-      // Schedule non-overlapping one-shot events via setTimeout chains
-      this.scheduleWind();
-      this.scheduleMelody();
-      this.scheduleHeartbeat();
+      // Schedule one-shot voices (each voice has exactly one pending timer)
+      const gen = this.generation;
+      this.scheduleWind(gen);
+      this.scheduleMelody(gen);
+      this.scheduleHeartbeat(gen);
     } catch { /* Audio not available */ }
   }
 
@@ -513,13 +561,14 @@ class AmbientMusic {
     this.oscillators.push(osc, lfo);
   }
 
-  private scheduleWind() {
-    if (!this.isPlaying || !this.ctx || !this.masterGain || !this.noiseBuffer) return;
+  private scheduleWind(gen: number) {
+    // Stale generation — this session was stopped, don't continue
+    if (gen !== this.generation || !this.isPlaying) return;
+    if (!this.ctx || !this.masterGain || !this.noiseBuffer) return;
 
-    // Don't overlap wind sounds — wait if one is still playing
     if (this.windPlaying) {
-      const id = setTimeout(() => this.scheduleWind(), 2000);
-      this.timeoutIds.push(id);
+      // Previous wind still audible — check again later
+      this.windTimer = setTimeout(() => this.scheduleWind(gen), 2000);
       return;
     }
 
@@ -545,16 +594,14 @@ class AmbientMusic {
       this.windPlaying = false;
     }
 
-    // Schedule next wind AFTER this one finishes + random gap
-    const nextDelay = (duration + 2 + Math.random() * 4) * 1000;
-    const id = setTimeout(() => this.scheduleWind(), nextDelay);
-    this.timeoutIds.push(id);
+    const nextDelay = (duration + 3 + Math.random() * 5) * 1000;
+    this.windTimer = setTimeout(() => this.scheduleWind(gen), nextDelay);
   }
 
-  private scheduleMelody() {
-    if (!this.isPlaying || !this.ctx || !this.masterGain) return;
+  private scheduleMelody(gen: number) {
+    if (gen !== this.generation || !this.isPlaying) return;
+    if (!this.ctx || !this.masterGain) return;
 
-    // Aztec pentatonic scale
     const notes = [146.83, 164.81, 174.61, 220, 261.63, 293.66, 329.63];
     const freq = notes[Math.floor(Math.random() * notes.length)];
     const noteDuration = 2 + Math.random() * 2;
@@ -576,14 +623,13 @@ class AmbientMusic {
       osc.stop(this.ctx.currentTime + noteDuration + 0.1);
     } catch { /* */ }
 
-    // Schedule next note AFTER this one ends + random silence gap
-    const nextDelay = (noteDuration + 1 + Math.random() * 5) * 1000;
-    const id = setTimeout(() => this.scheduleMelody(), nextDelay);
-    this.timeoutIds.push(id);
+    const nextDelay = (noteDuration + 2 + Math.random() * 6) * 1000;
+    this.melodyTimer = setTimeout(() => this.scheduleMelody(gen), nextDelay);
   }
 
-  private scheduleHeartbeat() {
-    if (!this.isPlaying || !this.ctx || !this.masterGain) return;
+  private scheduleHeartbeat(gen: number) {
+    if (gen !== this.generation || !this.isPlaying) return;
+    if (!this.ctx || !this.masterGain) return;
 
     try {
       const osc = this.ctx.createOscillator();
@@ -598,14 +644,19 @@ class AmbientMusic {
       osc.stop(this.ctx.currentTime + 0.6);
     } catch { /* */ }
 
-    // Steady heartbeat every 4-5s
-    const id = setTimeout(() => this.scheduleHeartbeat(), 4000 + Math.random() * 1000);
-    this.timeoutIds.push(id);
+    this.heartbeatTimer = setTimeout(() => this.scheduleHeartbeat(gen), 4000 + Math.random() * 1000);
   }
 
-  private cleanup() {
-    this.timeoutIds.forEach(clearTimeout);
-    this.timeoutIds = [];
+  private cancelTimers() {
+    if (this.windTimer) { clearTimeout(this.windTimer); this.windTimer = null; }
+    if (this.melodyTimer) { clearTimeout(this.melodyTimer); this.melodyTimer = null; }
+    if (this.heartbeatTimer) { clearTimeout(this.heartbeatTimer); this.heartbeatTimer = null; }
+    if (this.pendingTimeout) { clearTimeout(this.pendingTimeout); this.pendingTimeout = null; }
+  }
+
+  /** Immediate full teardown — no delayed cleanup */
+  private hardCleanup() {
+    this.cancelTimers();
     this.oscillators.forEach(o => { try { o.stop(); } catch { /* */ } });
     this.oscillators = [];
     this.windPlaying = false;
@@ -616,22 +667,28 @@ class AmbientMusic {
   }
 
   stop() {
+    if (!this.isPlaying) return;
     this.isPlaying = false;
-    // Cancel all scheduled events immediately
-    this.timeoutIds.forEach(clearTimeout);
-    this.timeoutIds = [];
+    this.generation++; // Invalidates all pending schedule callbacks
+    this.cancelTimers();
 
-    // Fade out master volume smoothly
+    // Fade out master volume, then clean up
     if (this.masterGain && this.ctx) {
       try {
         this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
         this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, this.ctx.currentTime);
-        this.masterGain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 1);
+        this.masterGain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.8);
       } catch { /* */ }
     }
 
-    // Full cleanup after fade-out completes
-    setTimeout(() => this.cleanup(), 1200);
+    // Cleanup after fade (but guard against start() being called in between)
+    const gen = this.generation;
+    this.pendingTimeout = setTimeout(() => {
+      // Only clean up if no new start() happened
+      if (gen === this.generation) {
+        this.hardCleanup();
+      }
+    }, 1000);
   }
 
   get playing() { return this.isPlaying; }
